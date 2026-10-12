@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup: four looks</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Figtree:wght@400..800&family=Fredoka:wght@400..700&family=Unbounded:wght@400..800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Static mockup for docs/design.md. Not production code: fonts load from Google here, but the real app self-hosts them. */
+html { color-scheme: light; }
+body { margin: 0; font-size: 14px; }
+[hidden] { display: none !important; }
+
+/* Layout: sticky control bar (brand color + light/dark), then three treatments side by side, each a live mobile-width preview with its spec underneath. */
+:root {
+  --bg: #f4f5f8;
+  --surface: #ffffff;
+  --ink: #15181f;
+  --muted: #596070;
+  --line: #dde0e7;
+  --chip: #e9ebf0;
+  --focus: #2563eb;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #101216; --surface: #181b21; --ink: #eceef2; --muted: #9aa1ae; --line: #2a2e37; --chip: #23272f; --focus: #7aa2ff;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #101216; --surface: #181b21; --ink: #eceef2; --muted: #9aa1ae; --line: #2a2e37; --chip: #23272f; --focus: #7aa2ff;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.wrap { max-width: 1200px; margin: 0 auto; padding: 32px 16px 72px; }
+h1 { font-size: clamp(1.7rem, 4vw, 2.3rem); line-height: 1.15; margin: 0 0 8px; text-wrap: balance; font-weight: 650; letter-spacing: -0.01em; }
+.lede { max-width: 66ch; color: var(--muted); margin: 0 0 24px; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); border-block: 1px solid var(--line);
+  display: flex; flex-wrap: wrap; gap: 12px 28px; align-items: center; padding: 12px 0; margin-bottom: 28px; }
+.bar .grp { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.bar .lbl { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.swatch { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--surface); box-shadow: 0 0 0 1px var(--line); cursor: pointer; padding: 0; }
+.swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--ink); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; background: var(--surface); color: var(--ink); font: inherit; font-size: 13px; padding: 6px 14px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.readout { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 28px; align-items: start; }
+.tcol { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+.tcol h2 { font-size: 1.15rem; margin: 0; font-weight: 650; }
+.tcol .tag { color: var(--muted); margin: 2px 0 0; font-size: 14px; }
+.spec { display: grid; gap: 12px; font-size: 13.5px; }
+.spec dl { margin: 0; display: grid; gap: 10px; }
+.spec dt { font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
+.spec dd { margin: 0; }
+.tokens { display: flex; gap: 6px; flex-wrap: wrap; }
+.tok { display: flex; align-items: center; gap: 6px; font-size: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px 3px 4px; }
+.tok i { width: 16px; height: 16px; border-radius: 4px; border: 1px solid rgba(128,128,128,.4); display: block; }
+
+.note { margin-top: 36px; display: grid; gap: 14px; max-width: 70ch; }
+.note h3 { margin: 0; font-size: 1.05rem; }
+.note p { margin: 0; color: var(--muted); }
+code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .9em; background: var(--chip); padding: 1px 5px; border-radius: 4px; }
+
+/* ---------- Preview frame (shared) ---------- */
+.pv { --p-brand: #2563eb; --p-on-brand: #ffffff; border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+  background: var(--p-bg); color: var(--p-ink); width: 100%; max-width: 420px; }
+.pv * { box-sizing: border-box; }
+.pv button, .pv input { font: inherit; }
+.pv [hidden] { display: none !important; }
+.pv :focus-visible { outline: 3px solid var(--p-brand); outline-offset: 2px; }
+.pv input { width: 100%; }
+
+/* ---------- Clean (default) ---------- */
+.clean { --p-bg: #f5f7fa; --p-surface: #ffffff; --p-ink: #172033; --p-muted: #5d6779; --p-line: #e3e8ef;
+  --p-shadow: 0 1px 2px rgba(23,32,51,.06), 0 8px 24px rgba(23,32,51,.06); --p-brand-text: var(--p-brand);
+  font-family: "Figtree", system-ui, sans-serif; font-size: 15.5px; line-height: 1.5; }
+.clean[data-mode="dark"] { --p-bg: #0f141c; --p-surface: #171e2a; --p-ink: #e8edf5; --p-muted: #98a3b6; --p-line: #263041;
+  --p-shadow: 0 1px 2px rgba(0,0,0,.4); --p-brand-text: color-mix(in srgb, var(--p-brand) 55%, white); }
+.c-top { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; }
+.c-logo { display: flex; align-items: center; gap: 10px; font-weight: 700; }
+.c-logo i { width: 28px; height: 28px; border-radius: 8px; background: var(--p-brand); color: var(--p-on-brand); display: grid; place-items: center; font-style: normal; font-size: 13px; font-weight: 800; }
+.c-login { background: transparent; border: 0; color: var(--p-brand-text); font-weight: 600; cursor: pointer; padding: 6px 4px; }
+.c-body { padding: 4px 16px 20px; display: grid; gap: 16px; }
+.c-head h3 { margin: 0; font-size: 26px; line-height: 1.12; font-weight: 750; letter-spacing: -.015em; text-wrap: balance; }
+.c-head p { margin: 4px 0 0; color: var(--p-muted); font-size: 14px; }
+.c-card { background: var(--p-surface); border: 1px solid var(--p-line); border-radius: 14px; box-shadow: var(--p-shadow); padding: 16px; display: grid; gap: 14px; }
+.c-pill { justify-self: start; font-size: 12px; font-weight: 700; background: color-mix(in srgb, var(--p-brand) 14%, var(--p-surface)); color: var(--p-brand-text); border-radius: 999px; padding: 3px 10px; }
+.c-card h4 { margin: 0; font-size: 20px; line-height: 1.2; font-weight: 700; }
+.c-facts { display: grid; gap: 8px; font-size: 14.5px; margin: 0; padding: 0; list-style: none; }
+.c-facts li { display: grid; grid-template-columns: 20px 1fr; gap: 10px; align-items: start; }
+.c-facts svg { width: 18px; height: 18px; stroke: var(--p-muted); fill: none; stroke-width: 1.8; margin-top: 2px; }
+.c-facts small { display: block; color: var(--p-muted); font-size: 13px; }
+.c-form { display: grid; gap: 10px; }
+.c-form input { border: 1px solid var(--p-line); background: var(--p-bg); color: var(--p-ink); border-radius: 10px; padding: 11px 12px; }
+.c-btn { background: var(--p-brand); color: var(--p-on-brand); border: 0; border-radius: 10px; padding: 12px 14px; font-weight: 700; cursor: pointer; }
+.c-going { background: color-mix(in srgb, var(--p-brand) 12%, var(--p-surface)); border-radius: 12px; padding: 12px 14px; display: grid; gap: 4px; }
+.c-going strong { font-size: 16px; }
+.c-link { background: none; border: 0; padding: 0; color: var(--p-muted); text-decoration: underline; cursor: pointer; justify-self: start; }
+.c-count { color: var(--p-muted); font-size: 13.5px; }
+
+@media (prefers-reduced-motion: no-preference) { .c-btn { transition: transform .08s ease; } }
+
+/* ---------- Derived palette (shared by the livelier treatments) ---------- */
+.pv { --a2: #0d9488; --a3: #f59e0b; --a4: #db2777;
+  --t1: color-mix(in srgb, var(--p-brand) 14%, #ffffff); --t2: #dff5f1; --t3: #fdf0d2; --t4: #fbe0ec; }
+.pv[data-mode="dark"] { --t1: color-mix(in srgb, var(--p-brand) 30%, #14161c); --t2: #123b37; --t3: #43330e; --t4: #4a1830; }
+@supports (color: oklch(from red l c h)) {
+  .pv { --a2: oklch(from var(--p-brand) 0.76 0.14 calc(h + 150)); --a3: oklch(from var(--p-brand) 0.82 0.14 calc(h + 60)); --a4: oklch(from var(--p-brand) 0.74 0.15 calc(h + 270));
+    --t1: oklch(from var(--p-brand) 0.95 0.04 h); --t2: oklch(from var(--p-brand) 0.95 0.045 calc(h + 150));
+    --t3: oklch(from var(--p-brand) 0.96 0.05 calc(h + 60)); --t4: oklch(from var(--p-brand) 0.95 0.045 calc(h + 270)); }
+  .pv[data-mode="dark"] { --t1: oklch(from var(--p-brand) 0.3 0.06 h); --t2: oklch(from var(--p-brand) 0.3 0.05 calc(h + 150));
+    --t3: oklch(from var(--p-brand) 0.3 0.05 calc(h + 60)); --t4: oklch(from var(--p-brand) 0.3 0.05 calc(h + 270)); }
+}
+.pv { position: relative; }
+@keyframes bump { 0% { transform: scale(1); } 40% { transform: scale(1.35); } 100% { transform: scale(1); } }
+.bump { display: inline-block; animation: bump .35s ease; }
+
+/* ---------- Clean, lively ---------- */
+.lively .l-cover { position: relative; overflow: hidden; background: var(--t1); }
+.lively .l-cover .c-top { position: relative; z-index: 1; }
+.lively .blob { position: absolute; border-radius: 50%; filter: blur(26px); opacity: .6; }
+.lively .b1 { width: 150px; height: 150px; background: var(--p-brand); right: -30px; top: -60px; animation: drift1 16s ease-in-out infinite alternate; }
+.lively .b2 { width: 120px; height: 120px; background: var(--a2); right: 90px; top: 10px; animation: drift2 19s ease-in-out infinite alternate; }
+.lively .b3 { width: 100px; height: 100px; background: var(--a3); right: 10px; top: 40px; animation: drift3 22s ease-in-out infinite alternate; }
+@keyframes drift1 { to { transform: translate(-40px, 24px); } }
+@keyframes drift2 { to { transform: translate(30px, -10px); } }
+@keyframes drift3 { to { transform: translate(-60px, -18px); } }
+.lively .c-body { padding-top: 16px; }
+.l-when { display: grid; grid-template-columns: 56px 1fr; gap: 14px; align-items: center; }
+.l-when h4 { margin: 0 0 2px; font-size: 20px; line-height: 1.2; font-weight: 700; }
+.l-when p { margin: 0; color: var(--p-muted); font-size: 14px; }
+.l-date { background: var(--t3); border-radius: 14px; text-align: center; padding: 8px 0 7px; line-height: 1; color: var(--p-ink); }
+.l-date b { display: block; font-size: 26px; font-weight: 800; }
+.l-date span { font-size: 11px; font-weight: 700; letter-spacing: .08em; }
+.l-ico { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; background: var(--t2); }
+.l-ico svg { width: 18px; height: 18px; margin: 0; stroke: var(--p-ink); }
+.lively .c-facts li { grid-template-columns: 30px 1fr; align-items: center; }
+.l-btn { background: linear-gradient(100deg, var(--p-brand), color-mix(in srgb, var(--p-brand) 70%, var(--a2))); }
+.l-avatars { display: flex; align-items: center; }
+.l-avatars i, .l-avatars em { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 800;
+  font-style: normal; border: 2px solid var(--p-surface); margin-left: -8px; color: #14171f; background: var(--c, var(--p-brand)); animation: pop .4s cubic-bezier(.3,1.6,.5,1) both; animation-delay: calc(var(--i) * 70ms); }
+.l-avatars i:first-child { margin-left: 0; }
+.l-avatars i.me { background: var(--p-brand); color: var(--p-on-brand); }
+.l-avatars em { background: var(--t1); color: var(--p-ink); }
+@keyframes pop { from { transform: scale(0); } to { transform: scale(1); } }
+.l-next { display: grid; gap: 8px; }
+.l-lab { font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--p-muted); font-weight: 700; }
+.l-row { display: grid; grid-template-columns: 44px 1fr; gap: 12px; align-items: center; font-size: 14.5px; font-weight: 600; }
+.l-row .d { font-style: normal; border-radius: 10px; text-align: center; padding: 5px 0; font-size: 10px; font-weight: 700; letter-spacing: .06em; line-height: 1.05; color: var(--p-ink); }
+.l-row .d b { display: block; font-size: 17px; letter-spacing: 0; }
+.l-row .t3 { background: var(--t3); } .l-row .t4 { background: var(--t4); }
+
+/* ---------- Confetti ---------- */
+.confetti { --p-bg: color-mix(in srgb, var(--p-brand) 7%, #ffffff); --p-ink: #1a1a24; --p-muted: #5d5d6e; --p-surface: #ffffff;
+  --p-brand-text: var(--p-brand); font-family: "Figtree", system-ui, sans-serif; font-size: 15.5px; line-height: 1.45; }
+.confetti[data-mode="dark"] { --p-bg: color-mix(in srgb, var(--p-brand) 9%, #13131a); --p-ink: #f1f1f6; --p-muted: #a7a7b8; --p-surface: #1c1c26;
+  --p-brand-text: color-mix(in srgb, var(--p-brand) 55%, white); }
+.confetti h3, .confetti strong, .confetti .f-big, .confetti .f-sticker b { font-family: "Fredoka", "Figtree", system-ui, sans-serif; }
+.f-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
+.f-top { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px 6px; gap: 10px; }
+.f-group { background: var(--t1); color: var(--p-ink); font-weight: 700; font-size: 13px; padding: 5px 12px; border-radius: 999px; }
+.f-login { background: var(--p-surface); color: var(--p-ink); border: 2px solid var(--p-ink); border-radius: 999px; padding: 4px 14px; font-weight: 700; cursor: pointer; }
+.f-body { padding: 8px 16px 20px; display: grid; gap: 14px; }
+.f-hero { display: grid; grid-template-columns: 78px 1fr; gap: 14px; align-items: center; }
+.f-hero h3 { margin: 0; font-size: 28px; line-height: 1.05; font-weight: 700; text-wrap: balance; }
+.f-sticker { background: var(--a3); color: #14171f; border: 3px solid #14171f; border-radius: 20px; text-align: center; padding: 8px 0 9px; line-height: 1;
+  box-shadow: 3px 3px 0 #14171f; transform: rotate(-5deg); animation: stick .55s cubic-bezier(.3,1.5,.5,1) both; }
+.f-sticker:hover { animation: wiggle .5s ease; }
+.f-sticker span { display: block; font-size: 12px; font-weight: 800; letter-spacing: .1em; }
+.f-sticker b { display: block; font-size: 38px; font-weight: 700; margin: 3px 0 2px; }
+@keyframes stick { from { transform: scale(.3) rotate(-25deg); opacity: 0; } to { transform: rotate(-5deg); opacity: 1; } }
+@keyframes wiggle { 0%, 100% { transform: rotate(-5deg); } 25% { transform: rotate(4deg); } 60% { transform: rotate(-9deg); } }
+.f-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.f-tile { border-radius: 22px; padding: 12px 14px; display: grid; gap: 1px; min-width: 0; color: var(--p-ink); }
+.f-tile.t1 { background: var(--t1); } .f-tile.t2 { background: var(--t2); } .f-tile.t3 { background: var(--t3); }
+.f-tile.wide { grid-column: span 2; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.f-tile strong { font-size: 19px; font-weight: 600; line-height: 1.15; }
+.f-tile small { font-size: 13px; opacity: .8; }
+.f-lab { font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; opacity: .75; }
+.f-tile.wide .f-lab { flex-basis: 100%; }
+.f-big { font-size: 44px !important; line-height: 1; font-weight: 700 !important; }
+.f-rsvp { background: var(--p-brand); color: var(--p-on-brand); border-radius: 26px; padding: 16px; }
+.f-form { display: grid; gap: 10px; }
+.f-form input { border: 0; border-radius: 14px; padding: 12px 14px; background: #ffffff; color: #1a1a24; }
+.f-btn { border: 3px solid #14171f; background: var(--a3); color: #14171f; border-radius: 16px; padding: 13px 14px; font-family: "Fredoka", sans-serif;
+  font-size: 19px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 0 #14171f; transition: transform .08s ease, box-shadow .08s ease; }
+.f-btn:active { transform: translateY(4px) scaleY(.94); box-shadow: 0 0 0 #14171f; }
+.f-going { display: grid; gap: 4px; text-align: center; animation: pop .5s cubic-bezier(.3,1.6,.5,1) both; }
+.f-going strong { font-size: 30px; font-weight: 700; }
+.f-link { background: none; border: 0; color: inherit; text-decoration: underline; cursor: pointer; padding: 6px; justify-self: center; }
+
+/* ---------- Poster ---------- */
+.poster { --p-bg: #ffffff; --p-ink: #14171f; --p-muted: #5a606c; --p-line: #d9dce3; font-family: "Figtree", system-ui, sans-serif; font-size: 15.5px; line-height: 1.45; }
+.poster[data-mode="dark"] { --p-bg: #14161c; --p-ink: #f0f1f5; --p-muted: #9ea4b1; --p-line: #2c303a; }
+.o-hero { background: var(--p-brand); color: var(--p-on-brand); padding: 14px 16px 22px; }
+.o-top { display: flex; justify-content: space-between; align-items: center; font-weight: 700; font-size: 14px; gap: 10px; }
+.o-login { background: transparent; color: inherit; border: 2px solid currentColor; border-radius: 999px; padding: 3px 14px; font-weight: 700; cursor: pointer; }
+.o-date { margin-top: 18px; line-height: .82; }
+.o-date b { display: block; font-family: "Unbounded", "Figtree", sans-serif; font-size: clamp(88px, 30vw, 124px); font-weight: 800; letter-spacing: -.04em; }
+.o-date span { display: block; margin-top: 10px; font-family: "Unbounded", sans-serif; font-size: 13px; font-weight: 600; letter-spacing: .14em; }
+.o-hero h3 { font-family: "Unbounded", "Figtree", sans-serif; font-size: 22px; line-height: 1.15; font-weight: 700; margin: 18px 0 8px; text-wrap: balance; }
+.o-meta { margin: 0; font-weight: 600; font-size: 14.5px; }
+.o-marquee { background: var(--a2); color: #14171f; overflow: hidden; white-space: nowrap; border-block: 2px solid #14171f; }
+.o-track { display: inline-flex; gap: 0; animation: marquee 22s linear infinite; }
+.o-track span { padding: 8px 18px; font-family: "Unbounded", sans-serif; font-size: 11px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
+.o-track span::after { content: "\2022"; margin-left: 36px; }
+@keyframes marquee { to { transform: translateX(-50%); } }
+.o-sheet { padding: 18px 16px 20px; display: grid; gap: 12px; background: var(--p-bg); }
+.o-form { display: grid; gap: 10px; }
+.o-form input { border: 2px solid var(--p-line); background: transparent; color: var(--p-ink); border-radius: 10px; padding: 11px 12px; }
+.o-btn { display: flex; justify-content: space-between; align-items: center; background: var(--p-ink); color: var(--p-bg); border: 0; border-radius: 10px; padding: 15px 16px;
+  font-family: "Unbounded", sans-serif; font-size: 14px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; cursor: pointer; }
+.o-btn span:last-child { font-size: 20px; transition: transform .15s ease; }
+.o-btn:hover span:last-child { transform: translateX(4px); }
+.o-ticket { display: grid; grid-template-columns: 1fr 14px 84px; align-items: stretch; background: var(--t1); color: var(--p-ink); border-radius: 12px; overflow: hidden; border-left: 8px solid var(--p-brand);
+  animation: drop .55s cubic-bezier(.3,1.4,.5,1) both; }
+.o-stub { padding: 14px; display: grid; gap: 3px; }
+.o-stub strong { font-family: "Unbounded", sans-serif; font-size: 16px; font-weight: 700; }
+.o-stub span { font-size: 13px; }
+.o-lab { font-size: 11px !important; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; opacity: .7; }
+.o-tear { background: radial-gradient(circle at 50% 0, var(--p-bg) 6px, transparent 7px) top / 14px 14px repeat-y; border-left: 2px dashed color-mix(in srgb, var(--p-ink) 35%, transparent); margin-left: 6px; width: 8px; }
+.o-side { display: grid; place-content: center; text-align: center; padding: 8px; }
+.o-side b { font-family: "Unbounded", sans-serif; font-size: 28px; line-height: 1; font-weight: 700; }
+.o-side span { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+@keyframes drop { from { transform: translateY(-14px) rotate(-2deg); opacity: 0; } to { transform: none; opacity: 1; } }
+.o-link { background: none; border: 0; color: var(--p-muted); text-decoration: underline; cursor: pointer; padding: 0; justify-self: start; }
+.o-count { font-size: 13.5px; color: var(--p-muted); font-weight: 600; }
+
+.sec { font-size: 1.1rem; margin: 0 0 14px; font-weight: 650; }
+.more { margin-top: 40px; border-top: 1px solid var(--line); padding-top: 16px; }
+.more summary { cursor: pointer; font-weight: 600; margin-bottom: 20px; }
+.tok i[data-dchip] { background: var(--chip); }
+@media (prefers-reduced-motion: reduce) {
+  .blob, .o-track, .f-sticker, .l-avatars i, .l-avatars em, .f-going, .o-ticket, .bump { animation: none !important; }
+  .f-btn, .o-btn span:last-child { transition: none; }
+}
+
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Meeting page mockup: four looks</h1>
+  <p class="lede">The same meeting page in each look a group can choose: Clean (the default), Clean, lively, Confetti and Poster. Change the group color, switch light and dark, and try the RSVP form. Reference for <code>design.md</code>; the real pages are server-rendered templates, so this file only shows intent.</p>
+
+  <div class="bar" role="group" aria-label="Preview controls">
+    <div class="grp">
+      <span class="lbl" id="brandLbl">Group brand color</span>
+      <span class="grp" role="group" aria-labelledby="brandLbl" id="swatches">
+        <button class="swatch" style="background:#2563eb" data-brand="#2563eb" data-name="Default blue" aria-pressed="true" aria-label="Default blue"></button>
+        <button class="swatch" style="background:#166534" data-brand="#166534" data-name="Forest" aria-pressed="false" aria-label="Forest green"></button>
+        <button class="swatch" style="background:#7e22ce" data-brand="#7e22ce" data-name="Plum" aria-pressed="false" aria-label="Plum"></button>
+        <button class="swatch" style="background:#f59e0b" data-brand="#f59e0b" data-name="Marigold" aria-pressed="false" aria-label="Marigold"></button>
+        <button class="swatch" style="background:#e11d48" data-brand="#e11d48" data-name="Rose" aria-pressed="false" aria-label="Rose"></button>
+      </span>
+    </div>
+    <div class="grp">
+      <span class="lbl" id="modeLbl">Preview</span>
+      <span class="seg" role="group" aria-labelledby="modeLbl">
+        <button id="modeLight" aria-pressed="true">Light</button>
+        <button id="modeDark" aria-pressed="false">Dark</button>
+      </span>
+    </div>
+    <span class="readout" id="readout" aria-live="polite"></span>
+  </div>
+
+  <h2 class="sec">The four looks</h2>
+  <div class="cols" id="previews">
+
+    <!-- Treatment 2 -->
+    <section class="tcol" aria-labelledby="t2">
+      <div><h2 id="t2">Clean (default)</h2><p class="tag">Familiar event-app polish. Soft cards, calm color, brand as an accent. Every group starts here.</p></div>
+      <div class="pv clean" data-mode="light">
+        <div class="c-top"><span class="c-logo"><i>FR</i>Front Range Trail Crew</span><button class="c-login">Log in</button></div>
+        <div class="c-body">
+          <div class="c-head"><h3>Front Range Trail Crew</h3><p>Hiking · Denver, CO · 38 members</p></div>
+          <article class="c-card">
+            <span class="c-pill">Next meeting</span>
+            <h4>Sunrise loop at Mount Falcon</h4>
+            <ul class="c-facts">
+              <li><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>Sat, Oct 3 · 6:15 AM MDT<small>90 minutes</small></span></li>
+              <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg><span>Mount Falcon Park<small>Indian Hills, CO</small></span></li>
+            </ul>
+            <div data-rsvp style="display:grid;gap:10px">
+              <form class="c-form" data-form novalidate>
+                <input type="email" placeholder="Your email" aria-label="Your email">
+                <input type="text" placeholder="Your name (optional)" aria-label="Your name (optional)">
+                <button class="c-btn" type="submit">RSVP</button>
+              </form>
+              <div class="c-going" data-going hidden>
+                <strong>You're going</strong>
+                <span>We emailed you the details.</span>
+                <button class="c-link" data-cancel type="button">Can't make it</button>
+              </div>
+              <div class="c-count"><span data-count>23</span> going</div>
+            </div>
+          </article>
+        </div>
+      </div>
+      <div class="spec"><dl>
+        <div><dt>Palette</dt><dd class="tokens">
+          <span class="tok"><i style="background:#172033"></i>Ink</span><span class="tok"><i style="background:#f5f7fa"></i>Ground</span><span class="tok"><i style="background:#ffffff"></i>Card</span><span class="tok"><i data-brandchip></i>Brand accent</span></dd></div>
+        <div><dt>Type</dt><dd>Figtree 400–750 for everything. One family keeps the page light and the CSS small.</dd></div>
+        <div><dt>Shape</dt><dd>12–14px corners, one soft shadow level, brand-tinted pills and confirmations.</dd></div>
+        <div><dt>Strength</dt><dd>Neutral and fast to build. Works for any kind of group, from a book club to a professional meetup.</dd></div>
+        <div><dt>Watch for</dt><dd>The least distinctive. Brand text on dark needs a lighter mix of the brand color, which the template has to compute.</dd></div>
+      </dl></div>
+    </section>
+
+
+    <!-- Clean, lively -->
+    <section class="tcol" aria-labelledby="t4">
+      <div><h2 id="t4">Clean, lively</h2><p class="tag">Clean's layout with extra colors derived from the brand. A drifting glow, tinted tiles, avatars that pop in.</p></div>
+      <div class="pv clean lively" data-mode="light">
+        <div class="l-cover">
+          <span class="blob b1" aria-hidden="true"></span><span class="blob b2" aria-hidden="true"></span><span class="blob b3" aria-hidden="true"></span>
+          <div class="c-top"><span class="c-logo"><i>FR</i>Front Range Trail Crew</span><button class="c-login">Log in</button></div>
+        </div>
+        <div class="c-body">
+          <div class="c-head"><h3>Front Range Trail Crew</h3><p>Hiking · Denver, CO · 38 members</p></div>
+          <article class="c-card">
+            <div class="l-when">
+              <div class="l-date" aria-hidden="true"><b>3</b><span>OCT</span></div>
+              <div><h4>Sunrise loop at Mount Falcon</h4><p>Sat, Oct 3 · 6:15 AM MDT · 90 min</p></div>
+            </div>
+            <ul class="c-facts">
+              <li><span class="l-ico i2"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></svg></span><span>Mount Falcon Park<small>Indian Hills, CO</small></span></li>
+            </ul>
+            <div data-rsvp style="display:grid;gap:10px">
+              <form class="c-form" data-form novalidate>
+                <input type="email" placeholder="Your email" aria-label="Your email">
+                <input type="text" placeholder="Your name (optional)" aria-label="Your name (optional)">
+                <button class="c-btn l-btn" type="submit">RSVP</button>
+              </form>
+              <div class="c-going" data-going hidden>
+                <strong>You're going</strong>
+                <div class="l-avatars" aria-hidden="true">
+                  <i style="--i:0;--c:var(--a2)">AK</i><i style="--i:1;--c:var(--a3)">JM</i><i style="--i:2;--c:var(--a4)">RS</i><i style="--i:3;--c:var(--a2)">TP</i><i class="me" style="--i:4">You</i><em style="--i:5">+19</em>
+                </div>
+                <button class="c-link" data-cancel type="button">Can't make it</button>
+              </div>
+              <div class="c-count"><span data-count>23</span> going</div>
+            </div>
+          </article>
+          <div class="l-next">
+            <span class="l-lab">Coming up</span>
+            <div class="l-row"><i class="d t3"><b>17</b>OCT</i><span>Fall colors at Guanella Pass</span></div>
+            <div class="l-row"><i class="d t4"><b>24</b>OCT</i><span>Trail work day, Bear Creek</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="spec"><dl>
+        <div><dt>Palette</dt><dd class="tokens">
+          <span class="tok"><i data-brandchip></i>Brand</span><span class="tok"><i data-dchip="--a2"></i>Derived 1</span><span class="tok"><i data-dchip="--a3"></i>Derived 2</span><span class="tok"><i data-dchip="--a4"></i>Derived 3</span></dd></div>
+        <div><dt>How color works</dt><dd>The group sets one brand color. The app derives three more by rotating its hue and fixing lightness, so every group gets a full palette without choosing one. Tints for tiles come from the same math.</dd></div>
+        <div><dt>Motion</dt><dd>A slow drifting glow in the header, a tick when the count changes, avatars that pop in after RSVP. All of it stops with reduced-motion settings.</dd></div>
+        <div><dt>Strength</dt><dd>Everything you liked in Clean, with more life. Derived colors keep a white-label group on-brand.</dd></div>
+        <div><dt>Watch for</dt><dd>Relative color syntax needs a current browser; older ones fall back to the single brand color. Derived hues can clash with an unusual brand color, so the group page should show a preview when branding is saved.</dd></div>
+      </dl></div>
+    </section>
+
+    <!-- Confetti -->
+    <section class="tcol" aria-labelledby="t5">
+      <div><h2 id="t5">Confetti</h2><p class="tag">Playful and colorful. Rounded tiles in four tints, a sticker date, and a burst when you RSVP.</p></div>
+      <div class="pv confetti" data-mode="light">
+        <canvas class="f-canvas" aria-hidden="true"></canvas>
+        <div class="f-top"><span class="f-group">Front Range Trail Crew</span><button class="f-login">Log in</button></div>
+        <div class="f-body">
+          <div class="f-hero">
+            <div class="f-sticker" aria-hidden="true"><span>SAT</span><b>3</b><span>OCT</span></div>
+            <h3>Sunrise loop at Mount Falcon</h3>
+          </div>
+          <div class="f-tiles">
+            <div class="f-tile t1"><span class="f-lab">When</span><strong>6:15 AM</strong><small>MDT · 90 min</small></div>
+            <div class="f-tile t3"><span class="f-lab">Where</span><strong>Mount Falcon</strong><small>Indian Hills, CO</small></div>
+            <div class="f-tile t2 wide"><span class="f-lab">Going</span><strong class="f-big"><span data-count>23</span></strong><small>of 38 members</small></div>
+          </div>
+          <div class="f-rsvp" data-rsvp>
+            <form class="f-form" data-form novalidate>
+              <input type="email" placeholder="Your email" aria-label="Your email">
+              <input type="text" placeholder="Your name (optional)" aria-label="Your name (optional)">
+              <button class="f-btn" type="submit">Count me in</button>
+            </form>
+            <div class="f-going" data-going hidden>
+              <strong>You're in!</strong>
+              <span>Check your email for the details.</span>
+              <button class="f-link" data-cancel type="button">Can't make it</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="spec"><dl>
+        <div><dt>Palette</dt><dd class="tokens">
+          <span class="tok"><i data-brandchip></i>Brand</span><span class="tok"><i data-dchip="--a2"></i>Derived 1</span><span class="tok"><i data-dchip="--a3"></i>Derived 2</span><span class="tok"><i data-dchip="--a4"></i>Derived 3</span></dd></div>
+        <div><dt>Type</dt><dd>Fredoka 500–700 for headings and numbers, Figtree for text. Rounded forms make every number feel friendly.</dd></div>
+        <div><dt>Motion</dt><dd>The sticker drops in on load and wiggles on hover. Pressing the RSVP button squishes it and fires a confetti burst in the group's own colors.</dd></div>
+        <div><dt>Strength</dt><dd>The most fun, and the most memorable for casual groups: game nights, kids' clubs, running crews.</dd></div>
+        <div><dt>Watch for</dt><dd>Too playful for professional meetups, and the busy palette makes white-label branding less distinct. Confetti is decoration only: the page changes the same way with it off.</dd></div>
+      </dl></div>
+    </section>
+
+    <!-- Poster -->
+    <section class="tcol" aria-labelledby="t6">
+      <div><h2 id="t6">Poster</h2><p class="tag">Bold and graphic. The brand color floods the top, the date is the biggest thing on the page.</p></div>
+      <div class="pv poster" data-mode="light">
+        <div class="o-hero">
+          <div class="o-top"><span>Front Range Trail Crew</span><button class="o-login">Log in</button></div>
+          <div class="o-date" aria-hidden="true"><b>03</b><span>SAT · OCT</span></div>
+          <h3>Sunrise loop at Mount Falcon</h3>
+          <p class="o-meta">6:15 AM MDT · 90 min · Indian Hills, CO</p>
+        </div>
+        <div class="o-marquee" aria-hidden="true"><div class="o-track">
+          <span>Hiking</span><span>Denver, CO</span><span>38 members</span><span>Free to join</span><span>Hiking</span><span>Denver, CO</span><span>38 members</span><span>Free to join</span>
+        </div></div>
+        <div class="o-sheet" data-rsvp>
+          <form class="o-form" data-form novalidate>
+            <input type="email" placeholder="Your email" aria-label="Your email">
+            <input type="text" placeholder="Your name (optional)" aria-label="Your name (optional)">
+            <button class="o-btn" type="submit"><span>RSVP</span><span aria-hidden="true">&rarr;</span></button>
+          </form>
+          <div class="o-ticket" data-going hidden>
+            <div class="o-stub"><span class="o-lab">Admit one</span><strong>You're going</strong><span>Sat, Oct 3 · 6:15 AM</span></div>
+            <div class="o-tear" aria-hidden="true"></div>
+            <div class="o-side"><b data-count2>24</b><span>going</span></div>
+          </div>
+          <button class="o-link" data-cancel type="button" hidden>Can't make it</button>
+          <div class="o-count"><span data-count>23</span> going</div>
+        </div>
+      </div>
+      <div class="spec"><dl>
+        <div><dt>Palette</dt><dd class="tokens">
+          <span class="tok"><i data-brandchip></i>Brand flood</span><span class="tok"><i data-dchip="--a2"></i>Derived strip</span><span class="tok"><i style="background:#14171f"></i>Ink</span><span class="tok"><i style="background:#ffffff"></i>Sheet</span></dd></div>
+        <div><dt>Type</dt><dd>Unbounded 600–800, a wide display face, for the date and title. Figtree for form text.</dd></div>
+        <div><dt>Motion</dt><dd>A scrolling strip of group facts. After RSVP the form becomes a ticket stub that drops into place.</dd></div>
+        <div><dt>Strength</dt><dd>Looks like an event, not a form. White-label groups get a poster in their own color.</dd></div>
+        <div><dt>Watch for</dt><dd>A very light brand color floods the top with low contrast against the white sheet, and a long meeting title needs a smaller size. The group page needs its own layout, since a poster fits one meeting best.</dd></div>
+      </dl></div>
+    </section>
+  </div>
+
+
+  <div class="note">
+    <h3>What every look has to honor</h3>
+    <p>A group sets one brand color (paid) and the app derives the rest. Free groups use the platform's default blue. Text on the brand color is chosen for contrast: marigold in the bar above gets dark text, not white. The readout shows the ratio.</p>
+    <p>All four looks use the same tokens and the same page structure. They differ in CSS and in a few partials (meeting header, "You're going" state, group header). Motion is decoration only and stops for visitors who prefer reduced motion.</p>
+  </div>
+</div>
+<script>
+(function () {
+  var root = document.querySelector('.wrap');
+  var pvs = root.querySelectorAll('.pv');
+  function lum(hex) {
+    var n = parseInt(hex.slice(1), 16), c = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(function (v) {
+      v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  }
+  function ratio(a, b) { var x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
+  function resolve(el, v) {
+    var p = document.createElement('span'); p.style.color = 'var(' + v + ')'; el.appendChild(p);
+    var c = getComputedStyle(p).color; el.removeChild(p); return c;
+  }
+  var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function confetti(pv) {
+    if (reduce) return;
+    var cv = pv.querySelector('.f-canvas'); if (!cv) return;
+    var r = pv.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+    cv.width = r.width * d; cv.height = r.height * d;
+    var ctx = cv.getContext('2d'); ctx.scale(d, d);
+    var cols = ['--p-brand', '--a2', '--a3', '--a4'].map(function (v) { return resolve(pv, v); });
+    var btn = pv.querySelector('.f-rsvp').getBoundingClientRect();
+    var ox = btn.left - r.left + btn.width / 2, oy = btn.top - r.top + 20, ps = [];
+    for (var i = 0; i < 80; i++) {
+      var a = -Math.PI / 2 + (Math.random() - .5) * 2.4, sp = 5 + Math.random() * 8;
+      ps.push({ x: ox, y: oy, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, w: 5 + Math.random() * 6, h: 3 + Math.random() * 5, rot: Math.random() * 6, vr: (Math.random() - .5) * .4, c: cols[i % cols.length] });
+    }
+    var t0 = performance.now();
+    (function frame(now) {
+      var t = now - t0; ctx.clearRect(0, 0, r.width, r.height);
+      ps.forEach(function (p) {
+        p.vy += .35; p.vx *= .99; p.x += p.vx; p.y += p.vy; p.rot += p.vr;
+        ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot); ctx.globalAlpha = Math.max(0, 1 - t / 1500);
+        ctx.fillStyle = p.c; ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h); ctx.restore();
+      });
+      if (t < 1500) requestAnimationFrame(frame); else ctx.clearRect(0, 0, r.width, r.height);
+    })(t0);
+  }
+  function setBrand(hex, name) {
+    var white = ratio(hex, '#ffffff'), ink = ratio(hex, '#14171f');
+    var onBrand = white >= 4.5 || white >= ink ? '#ffffff' : '#14171f';
+    var best = Math.max(white, ink);
+    pvs.forEach(function (p) { p.style.setProperty('--p-brand', hex); p.style.setProperty('--p-on-brand', onBrand); });
+    root.querySelectorAll('[data-brandchip]').forEach(function (i) { i.style.background = hex; });
+    root.querySelectorAll('[data-dchip]').forEach(function (i) { var pv = i.closest('.tcol').querySelector('.pv'); i.style.background = resolve(pv, i.dataset.dchip); });
+    document.getElementById('readout').textContent = name + ' · button text ' + (onBrand === '#ffffff' ? 'white' : 'dark') + ' · contrast ' + best.toFixed(1) + ':1' +
+      (white < 4.5 ? ' (white would be ' + white.toFixed(1) + ':1)' : '');
+  }
+  document.querySelectorAll('#swatches .swatch').forEach(function (b) {
+    b.addEventListener('click', function () {
+      document.querySelectorAll('#swatches .swatch').forEach(function (o) { o.setAttribute('aria-pressed', o === b ? 'true' : 'false'); });
+      setBrand(b.dataset.brand, b.dataset.name);
+    });
+  });
+  function setMode(m) {
+    pvs.forEach(function (p) { p.dataset.mode = m; });
+    document.getElementById('modeLight').setAttribute('aria-pressed', m === 'light');
+    document.getElementById('modeDark').setAttribute('aria-pressed', m === 'dark');
+  }
+  document.getElementById('modeLight').addEventListener('click', function () { setMode('light'); });
+  document.getElementById('modeDark').addEventListener('click', function () { setMode('dark'); });
+
+  root.querySelectorAll('[data-rsvp]').forEach(function (box) {
+    var form = box.querySelector('[data-form]'), going = box.querySelector('[data-going]');
+    var counts = box.querySelectorAll('[data-count]'), count2 = box.querySelector('[data-count2]');
+    var cancel = box.querySelector('[data-cancel]'), pv = box.closest('.pv');
+    function show(on) {
+      form.hidden = on; going.hidden = !on; cancel.hidden = !on;
+      counts.forEach(function (c) { c.textContent = on ? 24 : 23; c.classList.remove('bump'); void c.offsetWidth; if (!reduce) c.classList.add('bump'); });
+      if (count2) count2.textContent = 24;
+    }
+    form.addEventListener('submit', function (e) { e.preventDefault(); show(true); if (pv.classList.contains('confetti')) confetti(pv); });
+    cancel.addEventListener('click', function () { show(false); });
+  });
+  setBrand('#2563eb', 'Default blue');
+})();
+</script>
+</body>
+</html>

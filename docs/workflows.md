@@ -2,13 +2,13 @@
 
 Screen flows, sequence diagrams, and edge cases for every user-facing workflow.
 
-**Companion documents:** `prd.md` (requirements), `development-plan.md` (implementation), `design.md` (visual design).
+**Companion documents:** `prd.md` (requirements), `development-plan.md` (implementation), `design.md` (visual design), `decisions.md` (decisions and open questions).
 
 **Conventions used below:**
 
 - **"Organizer"** means the owner or a co-organizer.
 - **"Site"** is the hostname the visitor is on: the main platform or a group's custom domain. Unless noted, every flow works identically on both, and links in emails point back to the same site.
-- Diagram participants: **CDN** (BunnyCDN), **App** (Go), **DB** (Postgres), **Mail** (Resend), **Spaces** (DigitalOcean Spaces), **Stripe**.
+- Diagram participants: **CDN** (BunnyCDN), **App** (Go), **DB** (Postgres), **Mail** (email outbox → Amazon SES), **S3** (Amazon S3), **Stripe**.
 
 ---
 
@@ -113,7 +113,7 @@ User → Browser: email, name (optional), RSVP
 Browser → App: POST /groups/{slug}/meetings/{id}/rsvp
 App: validate + lowercase email; rate-limit by client IP
 App → DB: INSERT rsvp (id=UUIDv7) ON CONFLICT (meeting_id, email) DO NOTHING
-App → Mail (queued): confirmation with times in meeting tz, virtual link, signed cancel link (BaseURL of group)
+App → Mail (outbox row, same transaction): confirmation with times in meeting tz, virtual link, signed cancel link (BaseURL of group); no typed name echoed; skipped if the address is suppressed (response is identical either way)
 App → CDN: purge meeting page on every hostname the group is served from
 App → Browser: Set-Cookie (signed, host-only RSVP list) + "You're going" fragment + HX-Trigger: rsvp-changed
 Browser → App: GET /fragments/meetings/{id}/rsvp-count → updated count
@@ -268,7 +268,7 @@ App → Browser: form (+ Maps JS with Place Autocomplete, cities only)
 User → Browser: fill form, pick city (hidden: location, latitude, longitude), Create
 Browser → App: POST /admin/groups (multipart)
 App: validate; slug from name (≤60 chars, -2/-3 on collision)
-  [cover image] App: check type/size → Spaces: upload groups/{group_id}/{uuidv7}.jpg
+  [cover image] App: check type/size → S3: upload groups/{group_id}/{uuidv7}.jpg
 App → DB (one transaction): INSERT group (UUIDv7, timezone, settings); INSERT membership (owner); INSERT notification_preferences
 App → Browser: 302 /groups/{slug}
 ```
@@ -371,7 +371,7 @@ Browser → App: POST /groups/{slug}/posts (multipart)
 App: member? members_can_post or organizer? content non-empty?
 App: each file: sniffed type allowed? ≤10 MB?
 App → DB: SUM(size_bytes) for the group + new files ≤ storage_limit_bytes?
-App → Spaces: upload groups/{group_id}/{uuidv7}{ext}
+App → S3: upload groups/{group_id}/{uuidv7}{ext}
 App → DB (one transaction): INSERT post; INSERT attachments (with group_id, size)
 App → CDN: purge group page (all hostnames)
 App → Browser: new post fragment inserted at the top
@@ -383,7 +383,7 @@ Browser → App: POST /groups/{slug}/posts/{post_id}/replies   (parent must be a
 Browser → App: DELETE /posts/{id}
 App: author, organizer of the post's group, or platform admin?
 App → DB: storage keys for the post and its replies' attachments
-App → Spaces: delete those objects
+App → S3: delete those objects
 App → DB: DELETE post (cascades to replies and attachment rows)
 App → CDN: purge the affected page
 App → Browser: remove the post from the page
@@ -411,7 +411,8 @@ Two separate pages with different permissions.
 **Owner settings (owner only):** `/admin/groups/{slug}/settings`, in sections:
 
 - **Plan:** Free or Paid (renews/ends on date). Free groups: **Upgrade — $20/year**. Paid groups: **Manage billing** (Stripe's customer portal: card, invoices, cancel).
-- **Branding (paid):** primary color picker and logo upload, with a live preview.
+- **Look (every group):** a picker with four choices (Clean, Lively, Confetti, Poster), each previewed in the group's current color. Saving takes effect immediately.
+- **Branding (paid):** primary color picker and logo upload, with a live preview in the chosen look. Free groups see these two fields locked, with an upgrade link.
 - **Custom domain (paid):** see Workflow 13.
 - **Danger zone:** **Transfer ownership** (Workflow 9) and **Delete group**.
 
@@ -431,15 +432,18 @@ App → CDN: purge group pages
 
 -- Lapse (customer.subscription.deleted, or cancel-at-period-end reached) --
 Stripe → App: webhook
-App → DB: tier='free', member_limit=150, storage_limit=2 GB, branding='{}'
+App → DB: tier='free', member_limit=150, storage_limit=2 GB, branding='{}' (look is kept)
 App → Bunny: remove custom hostname (if any); clear domain columns; refresh site cache
 App: remove the domain from the Google browser key's allowed websites
 App → CDN: purge group pages
 
 -- Branding --
-Browser → App: POST /admin/groups/{slug}/branding (color, logo)
-App: color matches #RRGGBB? logo is an image ≤2 MB?
-App → Spaces: upload logo
+Browser → App: POST /admin/groups/{slug}/look (look)   (owner, any tier)
+App: look in the allowlist? → UPDATE groups.look → purge group pages
+
+Browser → App: POST /admin/groups/{slug}/branding (color, logo)   (owner, paid)
+App: color matches #RRGGBB? logo is an image ≤2 MB? compute text-on-brand and derived palette from the hex
+App → S3: upload logo
 App → DB: UPDATE branding
 App → CDN: purge group pages (all hostnames)
 
@@ -447,7 +451,7 @@ App → CDN: purge group pages (all hostnames)
 Browser → App: DELETE /admin/groups/{slug}   (owner; confirm by typing the group name)
 App → Stripe: cancel subscription (if any)
 App → Bunny: remove custom hostname (if any)
-App → Spaces: delete everything under groups/{group_id}/
+App → S3: delete everything under groups/{group_id}/
 App → DB: DELETE group (cascades)
 App → CDN: purge group pages
 App → Browser: 302 /admin
@@ -473,7 +477,7 @@ On the members page (`/admin/groups/{slug}/members`), each row shows the display
 - **Demote (owner):** "Make regular member" on a co-organizer → confirm.
 - **Invite by email (owner):** **Invite co-organizer** → email → "Invite sent." The recipient gets "You've been invited to help organize {group}" → confirm page → **Accept**. Nothing changes until they accept.
 - **Remove:** co-organizers can remove regular members; the owner can remove anyone but themselves. Confirm dialog.
-- **Transfer ownership (owner):** from owner settings, choose a member or co-organizer → type the group name to confirm. The new owner is emailed; the previous owner becomes a co-organizer. For a paid group: "Your subscription will run until {date} and won't renew. {New owner} will be asked to subscribe."
+- **Transfer ownership (owner):** from owner settings, choose a member or co-organizer → type the group name to confirm. The new owner is emailed; the previous owner becomes a co-organizer. For a paid group: "Your subscription will run until {date} and won't renew. {New owner} will be asked to subscribe, and won't be charged until your period ends."
 
 ### Sequence
 
@@ -490,7 +494,7 @@ App → Browser: 302 group admin
 -- Transfer --
 Browser → App: POST /admin/groups/{slug}/transfer-ownership (target user_id)   (owner)
 App → DB (one transaction): owner → co_organizer; target → owner   (the one-owner index guarantees exactly one owner)
-  [paid] App → Stripe: set cancel_at_period_end = true
+  [paid] App → Stripe: set cancel_at_period_end = true (new owner's Checkout later uses trial_end = old period end)
 App → Mail (queued): new owner notice (+ subscribe link if paid)
 App → Browser: 302 members page (now shown with co-organizer permissions)
 ```
@@ -676,7 +680,7 @@ App → DB: UPDATE users SET name
 
 Browser → App: POST /account/delete
 App → DB: owns a group? → refuse with list
-App → Spaces: delete the user's attachments
+App → S3: delete the user's attachments
 App → DB: DELETE user (cascades memberships, sessions, posts, preferences; RSVPs keep email, user_id → NULL)
 App → CDN: purge pages that showed their posts
 App → Browser: clear cookie, 302 /
