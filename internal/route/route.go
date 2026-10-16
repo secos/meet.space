@@ -239,6 +239,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	sc := r.cfg.Resolver.Resolve(req)
 	req = req.WithContext(site.NewContext(req.Context(), sc))
 	pw := middleware.NewPolicyWriter(w, middleware.NoStore, false)
+	pw.Logger = r.cfg.Logger.With("host", sc.Host, "method", req.Method, "path", req.URL.Path)
 	defer r.recoverPanic(pw, req)
 
 	if sc.Kind == site.KindNone {

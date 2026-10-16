@@ -444,6 +444,35 @@ func TestRule7_RouterAppliesDeclaredCachePolicy(t *testing.T) {
 	}
 }
 
+// Security Rule 7 (decisions.md "Cookie on a cacheable response"): through
+// the router, a cacheable route whose handler sets a cookie is sent
+// no-store, and the error log names the host, method and path.
+func TestRule7_RouterSendsCacheableRouteThatSetsCookieNoStore(t *testing.T) {
+	routes := table()
+	for i := range routes {
+		if routes[i].Pattern == "/directory" {
+			routes[i].Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.SetCookie(w, &http.Cookie{Name: "session", Value: "abc"})
+				fmt.Fprint(w, "directory")
+			})
+		}
+	}
+	h := build(t, routes)
+	res := h.do("GET", public, "/directory")
+	if got := res.Header.Get("Cache-Control"); got != "no-store, private" {
+		t.Errorf("Cache-Control %q", got)
+	}
+	log := h.logs.String()
+	for _, want := range []string{"level=ERROR", "cacheable response set a cookie", "host=" + public, "method=GET", "path=/directory"} {
+		if !strings.Contains(log, want) {
+			t.Errorf("log %q lacks %q", log, want)
+		}
+	}
+	if res := h.do("GET", public, "/"); res.Header.Get("Cache-Control") != "public, s-maxage=300" {
+		t.Errorf("cookie-free page: %q", res.Header.Get("Cache-Control"))
+	}
+}
+
 // Security Rule 7 (cache.go: "everything not opted in gets NoStore"): a
 // request that matches no route on its host is no-store because the router
 // never opted it in, not only because its status happens to be 4xx. The

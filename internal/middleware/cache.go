@@ -1,7 +1,9 @@
 package middleware
 
 import (
+	"log/slog"
 	"net/http"
+	"strings"
 )
 
 // CachePolicy is a route's declared caching class (development-plan.md,
@@ -26,6 +28,9 @@ const (
 	ImmutableValue  = "public, max-age=31536000, immutable"
 )
 
+// Cacheable reports whether the CDN may keep a response under this policy.
+func (p CachePolicy) Cacheable() bool { return p == PublicPage || p == Immutable }
+
 // Value is the Cache-Control header for the policy.
 func (p CachePolicy) Value() string {
 	switch p {
@@ -47,12 +52,18 @@ const TokenPageReferrerPolicy = "same-origin"
 // PolicyWriter sets Cache-Control (and Referrer-Policy on token pages) just
 // before the status line goes out, so a handler can't change them. Any
 // response with a status of 400 or more is sent no-store whatever the
-// route declared.
+// route declared. So is a cacheable response that sets a cookie, which
+// would otherwise hand one visitor's cookie to everyone the CDN serves it
+// to; that is a bug, so it is logged as an error (decisions.md "Cookie on
+// a cacheable response").
 type PolicyWriter struct {
 	http.ResponseWriter
 	Policy    CachePolicy
 	TokenPage bool
-	status    int
+	// Logger records a cacheable response that set a cookie. Nil means
+	// slog.Default().
+	Logger *slog.Logger
+	status int
 }
 
 // NewPolicyWriter wraps w.
@@ -71,11 +82,30 @@ func (pw *PolicyWriter) WriteHeader(status int) {
 	if status >= 400 {
 		policy = NoStore
 	}
+	if policy.Cacheable() && setsCookie(h) {
+		logger := pw.Logger
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Error("cacheable response set a cookie; sent no-store instead", "status", status)
+		policy = NoStore
+	}
 	h.Set("Cache-Control", policy.Value())
 	if pw.TokenPage {
 		h.Set("Referrer-Policy", TokenPageReferrerPolicy)
 	}
 	pw.ResponseWriter.WriteHeader(status)
+}
+
+// setsCookie reports whether h carries a Set-Cookie header under any
+// spelling; Go sends a key that was put in the map directly as written.
+func setsCookie(h http.Header) bool {
+	for k := range h {
+		if strings.EqualFold(k, "Set-Cookie") {
+			return true
+		}
+	}
+	return false
 }
 
 // Write sends a 200 status first if none was written.

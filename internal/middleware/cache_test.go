@@ -1,8 +1,10 @@
 package middleware_test
 
 import (
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"meet.space/internal/middleware"
@@ -69,5 +71,53 @@ func TestTokenPages_SendSameOriginReferrerPolicy(t *testing.T) {
 	middleware.NewPolicyWriter(rec, middleware.NoStore, false).WriteHeader(200)
 	if got := rec.Header().Get("Referrer-Policy"); got != "" {
 		t.Errorf("non-token page sent Referrer-Policy %q", got)
+	}
+}
+
+// Security Rule 7 (decisions.md "Cookie on a cacheable response"): a
+// response the CDN could keep is sent no-store if it sets a cookie, under
+// any spelling of the header, and the bug is logged as an error. The
+// cookie itself still goes out.
+func TestRule7_CacheableResponseThatSetsCookieIsSentNoStore(t *testing.T) {
+	for _, p := range []middleware.CachePolicy{middleware.PublicPage, middleware.Immutable} {
+		for _, status := range []int{200, 302} {
+			for _, set := range []func(http.Header){
+				func(h http.Header) { h.Set("Set-Cookie", "session=abc") },
+				func(h http.Header) { h["set-cookie"] = []string{"session=abc"} },
+			} {
+				var logs strings.Builder
+				rec := httptest.NewRecorder()
+				pw := middleware.NewPolicyWriter(rec, p, false)
+				pw.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+				set(pw.Header())
+				pw.WriteHeader(status)
+				if got := rec.Header().Get("Cache-Control"); got != "no-store, private" {
+					t.Errorf("policy %d status %d: Cache-Control %q", p, status, got)
+				}
+				if len(rec.Header().Values("Set-Cookie"))+len(rec.Header()["set-cookie"]) != 1 {
+					t.Errorf("policy %d status %d: cookie was not sent", p, status)
+				}
+				if l := logs.String(); !strings.Contains(l, "level=ERROR") || !strings.Contains(l, "cacheable response set a cookie") {
+					t.Errorf("policy %d status %d: log %q", p, status, l)
+				}
+			}
+		}
+	}
+}
+
+// A no-store response that sets a cookie (a login, an RSVP) is the normal
+// case: nothing is logged.
+func TestRule7_NoStoreResponseMaySetCookieQuietly(t *testing.T) {
+	var logs strings.Builder
+	rec := httptest.NewRecorder()
+	pw := middleware.NewPolicyWriter(rec, middleware.NoStore, false)
+	pw.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+	pw.Header().Set("Set-Cookie", "session=abc")
+	pw.WriteHeader(http.StatusSeeOther)
+	if got := rec.Header().Get("Cache-Control"); got != "no-store, private" {
+		t.Errorf("Cache-Control %q", got)
+	}
+	if logs.Len() != 0 {
+		t.Errorf("logged %q", logs.String())
 	}
 }
