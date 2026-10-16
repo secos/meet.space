@@ -1,0 +1,54 @@
+name: meetspace
+
+services:
+  app:
+    build: .
+    ports: ["${APP_PORT:-8080}:8080"]
+    environment:
+      DATABASE_URL: postgres://meetspace:devpassword@db:5432/meetspace?sslmode=disable
+      PLATFORM_NAME: meet.space
+      PUBLIC_HOST: localhost:${APP_PORT:-8080}
+      PUBLIC_BASE_URL: http://localhost:${APP_PORT:-8080}
+      APP_SECRET: dev-only-change-me-dev-only-change-me   # HMAC key for signed tokens
+      ORIGIN_HOST: origin.localhost:${APP_PORT:-8080}      # Serves /health and /webhooks/* only
+      HOST_SOURCE: host                                    # "host" or the name of a header; set from the Phase 9 spike
+      TRUSTED_PROXIES: ""                                  # CIDRs of the origin proxy (Caddy); empty in dev
+      SES_REGION: ""                                       # Empty → emails are logged to stdout and written to the outbox only
+      SES_CONFIG_SET_AUTH: ""
+      SES_CONFIG_SET_NOTIFY: ""
+      SES_FROM_AUTH: login@auth.meet.space
+      SES_FROM_NOTIFY: notifications@mail.meet.space
+      SES_REPLY_TO: ""
+      SNS_TOPIC_ARN: ""                                    # Only this topic is accepted at /webhooks/ses
+      BUNNY_API_KEY: ""                                    # Empty → CDN calls are no-ops
+      BUNNY_PULL_ZONE_ID: ""
+      S3_REGION: ""                                        # Empty → uploads go to a local ./uploads dir
+      S3_BUCKET: ""
+      # No AWS keys here. On EC2 the SDK uses the instance role.
+      STRIPE_SECRET_KEY: ""                                # Use Stripe test keys + `stripe listen` for webhooks
+      STRIPE_WEBHOOK_SECRET: ""
+      STRIPE_PRICE_ID: ""
+      GOOGLE_MAPS_BROWSER_KEY: ""
+      GOOGLE_MAPS_EMBED_KEY: ""
+      ENV: development
+    depends_on:
+      db: { condition: service_healthy }
+    volumes:
+      - ./templates:/app/templates
+      - ./static:/app/static
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: meetspace
+      POSTGRES_PASSWORD: devpassword
+      POSTGRES_DB: meetspace
+    ports: ["127.0.0.1:${DB_PORT:-5432}:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U meetspace"]
+      interval: 2s
+      retries: 10
+
+volumes:
+  pgdata:
