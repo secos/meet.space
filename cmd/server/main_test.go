@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -56,15 +58,19 @@ func TestMigrateCommand_UpThenDown(t *testing.T) {
 	}
 }
 
-// P0-TOOLING-06: starting the server never runs migrations. (What it does
-// when the schema is missing is open question 19; this only checks that
-// nothing was migrated.)
+// P0-TOOLING-06: starting the server never runs migrations; on an
+// unmigrated database it refuses to start instead (decisions.md "Schema
+// version at startup").
 func TestServe_NeverRunsMigrations(t *testing.T) {
 	_, url := testkit.NewEmptyDB(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	var out bytes.Buffer
-	_ = run(ctx, nil, environ(url, "LISTEN_ADDR=127.0.0.1:0"), &out, &out)
+	err := run(ctx, nil, environ(url, "LISTEN_ADDR=127.0.0.1:0"), &out, &out)
+	if !errors.Is(err, migrate.ErrSchemaBehind) || !strings.Contains(err.Error(), "version 0") ||
+		!strings.Contains(err.Error(), "needs 1") || !strings.Contains(err.Error(), "server migrate up") {
+		t.Errorf("serve on an unmigrated database: %v", err)
+	}
 	if v, _, err := migrate.Version(url); err != nil || v != 0 {
 		t.Errorf("serving migrated the database: version %d, err %v", v, err)
 	}
@@ -176,6 +182,60 @@ func TestServe_RunsTheOutbox(t *testing.T) {
 		}
 	case <-time.After(20 * time.Second):
 		t.Fatal("serve did not stop")
+	}
+}
+
+// decisions.md "Schema version at startup": a schema left dirty by a
+// failed migration stops the server before it listens.
+func TestServe_RefusesADirtySchema(t *testing.T) {
+	db := testkit.NewDB(t)
+	if _, err := db.Pool.Exec(context.Background(), `UPDATE schema_migrations SET dirty = true`); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var out bytes.Buffer
+	err := run(ctx, nil, environ(db.URL, "LISTEN_ADDR=127.0.0.1:0", "STATIC_DIR=../../static", "TEMPLATE_DIR=../../templates"), &out, &out)
+	if !errors.Is(err, migrate.ErrSchemaDirty) {
+		t.Errorf("serve on a dirty schema: %v\n%s", err, out.String())
+	}
+	if ctx.Err() != nil {
+		t.Error("serve kept running instead of refusing")
+	}
+}
+
+// decisions.md "Schema version at startup": a schema newer than the build
+// (the previous build, rolled back to) is served, with a warning.
+func TestServe_StartsOnANewerSchemaWithAWarning(t *testing.T) {
+	db := testkit.NewDB(t)
+	latest, err := migrate.Latest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(context.Background(), `UPDATE schema_migrations SET version = $1`, latest+1); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	out := &syncBuffer{}
+	done := make(chan error, 1)
+	go func() {
+		done <- run(ctx, nil, environ(db.URL, "LISTEN_ADDR=127.0.0.1:0", "STATIC_DIR=../../static", "TEMPLATE_DIR=../../templates"), out, out)
+	}()
+	want := fmt.Sprintf("database schema is newer than this build\" database=%d build=%d", latest+1, latest)
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline) && !strings.Contains(out.String(), want); time.Sleep(20 * time.Millisecond) {
+	}
+	if !strings.Contains(out.String(), want) {
+		t.Errorf("no warning %q in:\n%s", want, out.String())
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("serve stopped on a newer schema: %v\n%s", err, out.String())
+	case <-time.After(300 * time.Millisecond):
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Errorf("serve returned %v", err)
 	}
 }
 

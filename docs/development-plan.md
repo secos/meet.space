@@ -1025,8 +1025,10 @@ build:
 	docker build -t communitygroups:latest .
 
 deploy: build
+	# Migrate first: the server refuses to start on a schema that is behind
+	# (decisions.md "Schema version at startup").
+	docker compose -f docker-compose.prod.yml run --rm app ./server migrate up
 	docker compose -f docker-compose.prod.yml up -d
-	docker compose -f docker-compose.prod.yml exec app ./server migrate up
 ```
 
 ---

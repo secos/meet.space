@@ -99,3 +99,30 @@ func Version(databaseURL string) (version uint, dirty bool, err error) {
 	}
 	return version, dirty, closeAll(m, err)
 }
+
+// Errors from Check.
+var (
+	ErrSchemaBehind = errors.New("database schema is behind this build")
+	ErrSchemaDirty  = errors.New("database schema is dirty: a migration failed partway")
+)
+
+// Check reports whether this build can serve the database at databaseURL
+// (decisions.md "Schema version at startup"): the schema must be at least
+// Latest and not dirty. It returns the database's version and this
+// build's. A schema newer than the build is not an error, so the previous
+// build can be rolled back to.
+func Check(databaseURL string) (have, want uint, err error) {
+	if want, err = Latest(); err != nil {
+		return 0, 0, err
+	}
+	have, dirty, err := Version(databaseURL)
+	switch {
+	case err != nil:
+		return 0, want, err
+	case dirty:
+		return have, want, fmt.Errorf("%w at version %d; repair it by hand, then run `server migrate up`", ErrSchemaDirty, have)
+	case have < want:
+		return have, want, fmt.Errorf("%w: the database is at version %d and this build needs %d; run `server migrate up`", ErrSchemaBehind, have, want)
+	}
+	return have, want, nil
+}

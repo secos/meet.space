@@ -78,10 +78,19 @@ func serve(ctx context.Context, cfg config.Config, stdout io.Writer) error {
 	}
 	defer pool.Close()
 
-	// OPEN(Q19): what to do when the schema is behind, and when the domain
-	// map can't be loaded or refreshed, is an open owner question. For now
-	// a failed initial load stops the server rather than serving custom
-	// domains as unknown hosts.
+	// The schema must be current and clean before anything is served
+	// (decisions.md "Schema version at startup"); deploys migrate first.
+	have, want, err := migrate.Check(cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	if have > want {
+		logger.Warn("database schema is newer than this build", "database", have, "build", want)
+	}
+
+	// OPEN(Q19): what to do when the domain map can't be loaded or
+	// refreshed is an open owner question. For now a failed initial load
+	// stops the server rather than serving custom domains as unknown hosts.
 	domains := site.NewDomains(cfg.PublicHost, cfg.OriginHost)
 	if err := domains.Load(ctx, pool); err != nil {
 		return fmt.Errorf("load custom domains: %w", err)
