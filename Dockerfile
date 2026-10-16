@@ -5,7 +5,8 @@
 FROM --platform=$BUILDPLATFORM alpine:3.24 AS css
 ARG TAILWIND_VERSION=4.3.3
 ARG BUILDARCH
-RUN apk add --no-cache curl \
+# The musl build links the C++ runtime.
+RUN apk add --no-cache curl libstdc++ libgcc \
  && case "$BUILDARCH" in amd64) a=x64 ;; arm64) a=arm64 ;; *) echo "unsupported arch $BUILDARCH" && exit 1 ;; esac \
  && base=https://github.com/tailwindlabs/tailwindcss/releases/download/v${TAILWIND_VERSION} \
  && curl -fsSL -o /usr/local/bin/tailwindcss "$base/tailwindcss-linux-${a}-musl" \
