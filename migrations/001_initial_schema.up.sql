@@ -101,7 +101,8 @@ CREATE TABLE meetings (
     canceled         BOOLEAN NOT NULL DEFAULT FALSE,
     reminder_sent_at TIMESTAMPTZ,                        -- Reset to NULL when rescheduled
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (id, group_id)                                -- Lets a meeting comment require its meeting's group
 );
 CREATE INDEX idx_meetings_group_starts ON meetings (group_id, starts_at);
 CREATE INDEX idx_meetings_reminder_due ON meetings (starts_at)
@@ -124,15 +125,26 @@ CREATE INDEX idx_rsvps_user ON rsvps (user_id);
 --   meeting_id NULL, parent_id NULL      → feed post
 --   meeting_id NULL, parent_id NOT NULL  → reply to a feed post (one level deep)
 --   meeting_id NOT NULL, parent_id NULL  → meeting comment
+-- The two composite keys make the database refuse a reply to anything but a feed post in the
+-- same group, and a comment on another group's meeting (decisions.md "Reply rules in the
+-- database"). A NULL parent_id or meeting_id skips its key.
 CREATE TABLE posts (
-    id          UUID PRIMARY KEY,
-    group_id    UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-    meeting_id  UUID REFERENCES meetings(id) ON DELETE CASCADE,
-    parent_id   UUID REFERENCES posts(id) ON DELETE CASCADE,
-    user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    content     TEXT NOT NULL CHECK (length(content) > 0),
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CHECK (meeting_id IS NULL OR parent_id IS NULL)
+    id           UUID PRIMARY KEY,
+    group_id     UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    meeting_id   UUID,
+    parent_id    UUID,
+    user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    content      TEXT NOT NULL CHECK (length(content) > 0),
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    is_feed_post BOOLEAN GENERATED ALWAYS AS (meeting_id IS NULL AND parent_id IS NULL) STORED,
+    is_reply     BOOLEAN GENERATED ALWAYS AS (parent_id IS NOT NULL) STORED,
+    CHECK (meeting_id IS NULL OR parent_id IS NULL),
+    UNIQUE (id, group_id, is_feed_post),
+    CONSTRAINT posts_meeting_fkey FOREIGN KEY (meeting_id, group_id)
+        REFERENCES meetings (id, group_id) ON DELETE CASCADE,
+    -- A reply (is_reply = true) must point at a post in its own group with is_feed_post = true.
+    CONSTRAINT posts_parent_fkey FOREIGN KEY (parent_id, group_id, is_reply)
+        REFERENCES posts (id, group_id, is_feed_post) ON DELETE CASCADE
 );
 CREATE INDEX idx_posts_feed ON posts (group_id, id DESC) WHERE meeting_id IS NULL AND parent_id IS NULL;
 CREATE INDEX idx_posts_replies ON posts (parent_id, id) WHERE parent_id IS NOT NULL;

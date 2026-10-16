@@ -31,6 +31,27 @@ func wantValues(t *testing.T, f *fx, table, col, constraint string, accepted, re
 	}
 }
 
+// decisions.md "No triggers": the schema enforces its rules with
+// constraints and keys only. Postgres's own internal triggers (those that
+// implement foreign keys) don't count.
+func TestSchema_HasNoTriggers(t *testing.T) {
+	t.Parallel()
+	f := newFx(t)
+	rows, err := f.q.Query(f.ctx, `SELECT c.relname || '.' || tg.tgname FROM pg_trigger tg
+		JOIN pg_class c ON c.oid = tg.tgrelid
+		WHERE NOT tg.tgisinternal AND c.relnamespace = 'public'::regnamespace`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	triggers, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(triggers) != 0 {
+		t.Errorf("triggers in the schema: %v", triggers)
+	}
+}
+
 // ---- magic_links ---------------------------------------------------------
 
 // P0-SCHEMA-14
@@ -585,9 +606,6 @@ func TestRSVPs_UserDeletionKeepsTheRSVPWithEmail(t *testing.T) {
 // P0-SCHEMA-26
 // A post's content is never empty, and a post is a feed post, a reply to a
 // feed post, or a meeting comment, never both a reply and a comment.
-// OPEN (G-18): replies to replies, replies to comments and replies across
-// groups are not refused by the schema, and the documents don't say
-// whether the database must refuse them; they are not tested.
 func TestPosts_ContentAndShape(t *testing.T) {
 	t.Parallel()
 	f := newFx(t)
@@ -606,6 +624,58 @@ func TestPosts_ContentAndShape(t *testing.T) {
 		}
 	}
 	testkit.WantPgError(t, f.insert("posts", f.row("posts", "group_id", g, "parent_id", feed, "meeting_id", m)), pgerrcode.CheckViolation, "posts_check")
+}
+
+// workflows.md §7 ("Reply to a reply, or reply on a meeting comment: not
+// supported (rejected by the server and the database)"; a reply's parent
+// "must be a feed post in this group") and decisions.md "Reply rules in the
+// database": the database refuses any reply whose parent is not a feed
+// post in the reply's own group, and any comment on another group's
+// meeting, on insert and on update.
+func TestReplies_DatabaseEnforcesTheReplyRules(t *testing.T) {
+	t.Parallel()
+	f := newFx(t)
+	g, other := f.group(), f.group()
+	feed := f.post(g)
+	reply := f.post(g, "parent_id", feed)
+	m := f.meeting(g)
+	comment := f.post(g, "meeting_id", m)
+	if err := f.insert("posts", f.row("posts", "group_id", g, "parent_id", feed)); err != nil {
+		t.Errorf("second reply to a feed post refused: %v", err)
+	}
+	if err := f.insert("posts", f.row("posts", "group_id", g, "meeting_id", m)); err != nil {
+		t.Errorf("comment on the group's own meeting refused: %v", err)
+	}
+
+	for name, shape := range map[string][]any{
+		"reply to a reply":                {"group_id", g, "parent_id", reply},
+		"reply to a meeting comment":      {"group_id", g, "parent_id", comment},
+		"reply to another group's post":   {"group_id", other, "parent_id", feed},
+		"reply to another group's reply":  {"group_id", other, "parent_id", reply},
+		"reply to a post that is missing": {"group_id", g, "parent_id", newID(t)},
+	} {
+		if !testkit.WantPgError(t, f.insert("posts", f.row("posts", shape...)), pgerrcode.ForeignKeyViolation, "posts_parent_fkey") {
+			t.Errorf("  (%s)", name)
+		}
+	}
+	testkit.WantPgError(t, f.insert("posts", f.row("posts", "group_id", other, "meeting_id", m)),
+		pgerrcode.ForeignKeyViolation, "posts_meeting_fkey")
+
+	// Updates that would break the rules are refused too.
+	testkit.WantPgError(t, f.try(`UPDATE posts SET meeting_id = $1 WHERE id = $2`, m, feed),
+		pgerrcode.ForeignKeyViolation, "posts_parent_fkey") // a feed post with replies can't become a comment
+	testkit.WantPgError(t, f.try(`UPDATE posts SET group_id = $1 WHERE id = $2`, other, reply),
+		pgerrcode.ForeignKeyViolation, "posts_parent_fkey")
+	testkit.WantPgError(t, f.try(`UPDATE posts SET parent_id = $1 WHERE id = $2`, reply, f.post(g)),
+		pgerrcode.ForeignKeyViolation, "posts_parent_fkey")
+	testkit.WantPgError(t, f.try(`UPDATE posts SET group_id = $1 WHERE id = $2`, other, comment),
+		pgerrcode.ForeignKeyViolation, "posts_meeting_fkey")
+
+	// Deleting a feed post still deletes its replies.
+	f.exec(`DELETE FROM posts WHERE id = $1`, feed)
+	if n := f.count(`SELECT count(*) FROM posts WHERE parent_id = $1`, feed); n != 0 {
+		t.Errorf("%d replies outlived their feed post", n)
+	}
 }
 
 // ---- notification_preferences, email_opt_outs ----------------------------

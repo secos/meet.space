@@ -242,9 +242,10 @@ func TestNotNullColumns_RejectNull(t *testing.T) {
 	}
 }
 
-// foreignKeys are the plan's 20 references, with the constraint names
-// Postgres gives them.
-var foreignKeys = []struct{ table, column, constraint string }{
+// foreignKeys are the plan's 20 references: the referencing columns in key
+// order (the first is the one the test breaks) and the constraint name.
+// Two are composite (decisions.md "Reply rules in the database").
+var foreignKeys = []struct{ table, columns, constraint string }{
 	{"attachments", "group_id", "attachments_group_id_fkey"},
 	{"attachments", "post_id", "attachments_post_id_fkey"},
 	{"email_events", "group_id", "email_events_group_id_fkey"},
@@ -257,8 +258,8 @@ var foreignKeys = []struct{ table, column, constraint string }{
 	{"notification_preferences", "group_id", "notification_preferences_group_id_fkey"},
 	{"notification_preferences", "user_id", "notification_preferences_user_id_fkey"},
 	{"posts", "group_id", "posts_group_id_fkey"},
-	{"posts", "meeting_id", "posts_meeting_id_fkey"},
-	{"posts", "parent_id", "posts_parent_id_fkey"},
+	{"posts", "meeting_id,group_id", "posts_meeting_fkey"},
+	{"posts", "parent_id,group_id,is_reply", "posts_parent_fkey"},
 	{"posts", "user_id", "posts_user_id_fkey"},
 	{"rsvps", "meeting_id", "rsvps_meeting_id_fkey"},
 	{"rsvps", "user_id", "rsvps_user_id_fkey"},
@@ -273,10 +274,12 @@ var foreignKeys = []struct{ table, column, constraint string }{
 func TestForeignKeys_RejectDanglingReferences(t *testing.T) {
 	t.Parallel()
 	f := newFx(t)
-	rows, err := f.q.Query(f.ctx, `SELECT cl.relname || '.' || a.attname || ' ' || con.conname
+	rows, err := f.q.Query(f.ctx, `SELECT cl.relname || '.' || array_to_string(ARRAY(
+			SELECT a.attname FROM unnest(con.conkey) WITH ORDINALITY k(attnum, ord)
+			JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum
+			ORDER BY k.ord), ',') || ' ' || con.conname
 		FROM pg_constraint con
 		JOIN pg_class cl ON cl.oid = con.conrelid
-		JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = ANY (con.conkey)
 		WHERE con.contype = 'f' AND con.connamespace = 'public'::regnamespace
 		ORDER BY 1`)
 	if err != nil {
@@ -286,18 +289,21 @@ func TestForeignKeys_RejectDanglingReferences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	slices.Sort(inCatalog)
 	var listed []string
 	for _, fk := range foreignKeys {
-		listed = append(listed, fk.table+"."+fk.column+" "+fk.constraint)
+		listed = append(listed, fk.table+"."+fk.columns+" "+fk.constraint)
 	}
+	slices.Sort(listed)
 	if !slices.Equal(inCatalog, listed) {
 		t.Errorf("foreign keys in the catalog:\n  %s\nwant:\n  %s", strings.Join(inCatalog, "\n  "), strings.Join(listed, "\n  "))
 	}
 	for _, fk := range foreignKeys {
-		t.Run(fk.table+"."+fk.column, func(t *testing.T) {
+		column, _, _ := strings.Cut(fk.columns, ",")
+		t.Run(fk.table+"."+column, func(t *testing.T) {
 			f := f.on(t)
 			missing := newID(t)
-			testkit.WantPgError(t, f.insert(fk.table, f.row(fk.table, fk.column, missing)), pgerrcode.ForeignKeyViolation, fk.constraint)
+			testkit.WantPgError(t, f.insert(fk.table, f.row(fk.table, column, missing)), pgerrcode.ForeignKeyViolation, fk.constraint)
 
 			r := f.add(fk.table)
 			var where []string
@@ -306,7 +312,7 @@ func TestForeignKeys_RejectDanglingReferences(t *testing.T) {
 				where = append(where, fmt.Sprintf("%s = $%d", k, i+2))
 				args = append(args, r[k])
 			}
-			err := f.try(fmt.Sprintf("UPDATE %s SET %s = $1 WHERE %s", fk.table, fk.column, strings.Join(where, " AND ")), args...)
+			err := f.try(fmt.Sprintf("UPDATE %s SET %s = $1 WHERE %s", fk.table, column, strings.Join(where, " AND ")), args...)
 			testkit.WantPgError(t, err, pgerrcode.ForeignKeyViolation, fk.constraint)
 		})
 	}
