@@ -1,0 +1,12 @@
+{{/* One message, one way out (design.md 6; decisions.md "Error pages").
+     .Content is a tmpl.ErrorContent; the caller supplies the words. */}}
+{{define "content"}}
+{{- with .Content}}
+<section class="flex flex-col items-start gap-4">
+  <h1 class="text-2xl sm:text-3xl">{{.Message}}</h1>
+  {{- if .LinkText}}
+  <a href="{{.LinkHref}}" class="inline-flex min-h-11 items-center font-semibold text-brand-text underline underline-offset-4">{{.LinkText}}</a>
+  {{- end}}
+</section>
+{{- end}}
+{{end}}

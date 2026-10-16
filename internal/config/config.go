@@ -45,13 +45,13 @@ type Config struct {
 	TrustedProxies []string `env:"TRUSTED_PROXIES" envSeparator:","`
 	ClientIPHeader string   `env:"CLIENT_IP_HEADER" envDefault:"X-Forwarded-For"`
 
-	SESRegion        string `env:"SES_REGION"`
-	SESConfigSetAuth string `env:"SES_CONFIG_SET_AUTH"`
+	SESRegion          string `env:"SES_REGION"`
+	SESConfigSetAuth   string `env:"SES_CONFIG_SET_AUTH"`
 	SESConfigSetNotify string `env:"SES_CONFIG_SET_NOTIFY"`
-	SESFromAuth      string `env:"SES_FROM_AUTH"`
-	SESFromNotify    string `env:"SES_FROM_NOTIFY"`
-	SESReplyTo       string `env:"SES_REPLY_TO"`
-	SNSTopicARN      string `env:"SNS_TOPIC_ARN"`
+	SESFromAuth        string `env:"SES_FROM_AUTH"`
+	SESFromNotify      string `env:"SES_FROM_NOTIFY"`
+	SESReplyTo         string `env:"SES_REPLY_TO"`
+	SNSTopicARN        string `env:"SNS_TOPIC_ARN"`
 
 	BunnyAPIKey     string `env:"BUNNY_API_KEY"`
 	BunnyPullZoneID string `env:"BUNNY_PULL_ZONE_ID"`

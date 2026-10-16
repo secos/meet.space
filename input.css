@@ -1,0 +1,274 @@
+/*
+  Stylesheet entry (Tailwind v4).
+
+  docs/design.md is the source of truth for every value here (section 2 for
+  tokens). The development plan's Tailwind classes are illustrative only.
+
+  Build:  ./bin/tailwindcss -i input.css -o static/css/output.css
+  (or `make css-build`). Tailwind v4.3.3 does not rewrite an output file whose
+  content is unchanged, so output.css can be older than its sources and
+  still current: when it is older, the tests build afresh with
+  bin/tailwindcss and compare content. internal/designtokens tests check
+  this file and the built output.
+
+  Rules for this file:
+  - Colors appear only as token definitions (the @theme block and the dark
+    block below). Everything else uses var(--color-...).
+  - Templates use token utilities only (bg-surface, text-muted, border-line,
+    ...). The Tailwind default palette is removed (--color-*: initial), so
+    gray-50, white, red-700 and friends do not exist.
+*/
+
+/* Scan only the templates and our own scripts, never docs/ or Go code. */
+@import "tailwindcss" source(none);
+@source "./templates";
+@source "./static/js";
+
+/*
+  Figtree, self-hosted (design.md 2.3). The files carry the first 8 hex
+  digits of their sha256 in the name, so the URL changes when the file
+  does. They are served from the visitor's own hostname, so white-label
+  domains never contact a font provider. The variable font's wght axis
+  runs 300-900 (read from its fvar table), covering the 400-800 we use.
+*/
+@font-face {
+  font-family: "Figtree";
+  font-style: normal;
+  font-weight: 300 900;
+  font-display: swap;
+  src: url("/static/fonts/figtree-variable.6b96ce6d.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Figtree";
+  font-style: italic;
+  font-weight: 300 900;
+  font-display: swap;
+  src: url("/static/fonts/figtree-italic-variable.3662c283.woff2") format("woff2");
+}
+
+/*
+  Tokens. `static` makes Tailwind emit every one of these as a custom
+  property on :root, used or not, so a group's server-computed <style>
+  block can override them and component CSS can read them.
+*/
+@theme static {
+  /* Only our tokens exist: no default palette, no default type scale. */
+  --color-*: initial;
+  --text-*: initial;
+  --radius-*: initial;
+  --shadow-*: initial;
+  --breakpoint-*: initial;
+
+  /* Neutrals, Clean (design.md 2.1). Light values; dark values below. */
+  --color-ground: #f5f7fa;
+  --color-surface: #ffffff;
+  --color-ink: #172033;
+  --color-muted: #5d6779;
+  --color-line: #e3e8ef;
+
+  /* Semantic colors (design.md 2.1). Never the brand color; groups do not
+     override them. Info follows the brand: its text is brand-text and its
+     background is tint-1, in both modes ("same"), so it has no dark value
+     of its own. */
+  --color-success: #166534;
+  --color-success-bg: #dcfce7;
+  --color-warning: #92400e;
+  --color-warning-bg: #fef3c7;
+  --color-danger: #b91c1c;
+  --color-danger-bg: #fee2e2;
+  --color-info: var(--color-brand-text);
+  --color-info-bg: var(--color-tint-1);
+
+  /*
+    Brand and derived (design.md 2.1, section 4), for the platform default
+    #2563eb. A group's page overrides these from internal/branding
+    (Phase 4b). Computed in OKLCH (Bjorn Ottosson's OKLab matrices, sRGB
+    transfer function), hex rounded to the nearest 8-bit value.
+
+    #2563eb = oklch(0.5461 0.2152 262.88).
+
+    brand-contrast (4.2): white on #2563eb is 5.17:1 (>= 4.5), so white.
+    The brand and the text on it do not change in dark mode (2.2).
+
+    brand-text (4.3), light: lower L until >= 4.5:1 on surface #ffffff
+    (and, checked too, ground #f5f7fa). #2563eb is already 5.17:1 on
+    surface and 4.82:1 on ground, so it is unchanged.
+
+    accent-n (4.1): L and C from the table, hue = 262.88 + offset. Out of
+    sRGB, chroma is reduced (binary search) with L and h kept:
+      accent-1  L0.76 C0.14  h52.88    -> #f69656
+      accent-2  L0.82 C0.14  h322.88   -> #efa4f9
+      accent-3  L0.74 C0.15  h172.88   -> #00c7a2 (C reduced to 0.142)
+    Accents have no dark value ("same").
+
+    tint-n (4.1), light:
+      tint-1  L0.95 C0.04   h262.88  -> #e6efff (C reduced to 0.024)
+      tint-2  L0.95 C0.045  h52.88   -> #ffeadd (C reduced to 0.029)
+      tint-3  L0.96 C0.05   h322.88  -> #fdebff (C reduced to 0.033)
+      tint-4  L0.95 C0.045  h172.88  -> #d1f9eb
+    Dark values are in the dark block below.
+  */
+  --color-brand: #2563eb;
+  --color-brand-contrast: #ffffff;
+  --color-brand-text: #2563eb;
+  --color-accent-1: #f69656;
+  --color-accent-2: #efa4f9;
+  --color-accent-3: #00c7a2;
+  --color-tint-1: #e6efff;
+  --color-tint-2: #ffeadd;
+  --color-tint-3: #fdebff;
+  --color-tint-4: #d1f9eb;
+
+  /* Type (design.md 2.3): size / line height, 16px = 1rem. */
+  --font-sans: "Figtree", ui-sans-serif, system-ui, sans-serif;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1rem;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base: 1rem;
+  --text-base--line-height: 1.5rem;
+  --text-lg: 1.125rem;
+  --text-lg--line-height: 1.625rem;
+  --text-xl: 1.25rem;
+  --text-xl--line-height: 1.625rem;
+  --text-2xl: 1.625rem;
+  --text-2xl--line-height: 1.875rem;
+  --text-3xl: 2rem;
+  --text-3xl--line-height: 2.25rem;
+
+  /* Space, shape, elevation (design.md 2.4). */
+  --spacing: 0.25rem;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --breakpoint-sm: 40rem;
+  --breakpoint-lg: 64rem;
+  /* The content column: max-w-page. */
+  --container-page: 56rem;
+  /* One card shadow; none in dark mode (a 1px line instead). Tailwind's
+     shadow-card utility copies this light value in at build time (checked
+     with v4.3.3), so it would keep the shadow in dark mode: cards use
+     shadow-(--shadow-card), which reads the variable, instead. (The
+     built-CSS color check in internal/designtokens fails on shadow-card,
+     because the copied rgb() lands in the utilities layer.) */
+  --shadow-card: 0 1px 2px rgb(23 32 51 / 0.06), 0 8px 24px rgb(23 32 51 / 0.06);
+}
+
+/*
+  Dark mode follows the system setting (design.md 2.2); there is no toggle
+  in v1. Every token with its own dark value is redefined here. brand,
+  brand-contrast, the accents and info keep their light definitions.
+
+  brand-text, dark (4.3): raise #2563eb's L (hue kept, chroma reduced to
+  stay in sRGB) until >= 4.5:1 on dark surface #171e2a and dark ground
+  #0f141c: L 0.623 -> #417eff, 4.50:1 on surface, 4.97:1 on ground,
+  hue 262.88.
+
+  tint-n, dark (4.1):
+    tint-1  L0.30 C0.06  h262.88  -> #1d2d4c
+    tint-2  L0.30 C0.05  h52.88   -> #412615
+    tint-3  L0.30 C0.05  h322.88  -> #3a253c
+    tint-4  L0.30 C0.05  h172.88  -> #0b362b
+*/
+@layer theme {
+  :root {
+    color-scheme: light;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+
+      --color-ground: #0f141c;
+      --color-surface: #171e2a;
+      --color-ink: #e8edf5;
+      --color-muted: #98a3b6;
+      --color-line: #263041;
+
+      --color-success: #4ade80;
+      --color-success-bg: #123222;
+      --color-warning: #fbbf24;
+      --color-warning-bg: #3a2a08;
+      --color-danger: #f87171;
+      --color-danger-bg: #3b1414;
+
+      --color-brand-text: #417eff;
+      --color-tint-1: #1d2d4c;
+      --color-tint-2: #412615;
+      --color-tint-3: #3a253c;
+      --color-tint-4: #0b362b;
+
+      --shadow-card: none;
+    }
+  }
+}
+
+@layer base {
+  body {
+    background-color: var(--color-ground);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
+    /* Long unbroken names and titles wrap instead of overflowing
+       (design.md 5, rule 4). */
+    overflow-wrap: anywhere;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+  }
+
+  /* Visible focus on every interactive element: 3px brand ring, 2px
+     offset (design.md 3 and 9). An outline, so it also shows in forced
+     colors mode. */
+  :focus-visible {
+    outline: 3px solid var(--color-brand);
+    outline-offset: 2px;
+  }
+
+  /*
+    200ms fade when htmx swaps content in (design.md 2.5).
+
+    htmx 4.0.0 puts the class htmx-added on swapped-in nodes, but removes it
+    in the same task unless the swap has settle work (static/js/htmx.min.js:
+    the removal only waits defaultSettleDelay when there are settle tasks),
+    so the browser usually never styles a node with that class. The fade
+    therefore starts from @starting-style, which applies to a node's first
+    style: children of an htmx element ([data-htmx-powered], set by htmx 4
+    on every element it initializes) that were just inserted. Nodes already
+    on the page when htmx initializes have been styled before, so they do
+    not fade. htmx-added is kept for swaps that do settle.
+  */
+  [data-htmx-powered] > *,
+  .htmx-added {
+    transition: opacity 200ms ease-out;
+  }
+
+  @starting-style {
+    [data-htmx-powered] > *,
+    .htmx-added {
+      opacity: 0;
+    }
+  }
+
+  /* Everything animated stops under reduced motion (design.md 2.5, 9).
+     In the base layer, these !important declarations beat any later
+     layer's (components, utilities) and unlayered CSS. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation: none !important;
+      transition: none !important;
+    }
+  }
+}

@@ -1,0 +1,370 @@
+package route_test
+
+import (
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"net/netip"
+	"strings"
+	"sync/atomic"
+	"testing"
+
+	"github.com/google/uuid"
+
+	"meet.space/internal/middleware"
+	"meet.space/internal/route"
+	"meet.space/internal/site"
+	_ "meet.space/internal/testkit/nonet"
+)
+
+const (
+	public  = "localhost:8080"
+	origin  = "origin.localhost:8080"
+	hikers  = "hikers.localhost:8080"
+	unknown = "unknown.localhost:8080"
+)
+
+var allHosts = []string{public, hikers, origin, unknown}
+
+type harness struct {
+	router   *route.Router
+	ran      map[string]*atomic.Int32 // route key → handler calls
+	notFound atomic.Int32
+	logs     *strings.Builder
+}
+
+func ok(body string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		fmt.Fprint(w, body)
+	})
+}
+
+func build(t *testing.T, routes []route.Route) *harness {
+	t.Helper()
+	h := &harness{ran: map[string]*atomic.Int32{}, logs: &strings.Builder{}}
+	for i := range routes {
+		n := &atomic.Int32{}
+		h.ran[routes[i].Key()] = n
+		inner := routes[i].Handler
+		routes[i].Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			n.Add(1)
+			inner.ServeHTTP(w, r)
+		})
+	}
+	d := site.NewDomains(public, origin)
+	d.Set(map[string]uuid.UUID{hikers: uuid.Must(uuid.NewV7())})
+	r, err := route.Build(route.Config{
+		Resolver: &site.Resolver{PublicHost: public, OriginHost: origin, HostSource: "host", Domains: d},
+		ClientIP: func(r *http.Request) netip.Addr { return middleware.ClientIP(r, nil, "X-Forwarded-For") },
+		NotFound: func(w http.ResponseWriter, r *http.Request) {
+			h.notFound.Add(1)
+			w.Header().Set("Content-Type", "text/plain")
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, "site-aware 404 for "+site.FromContext(r.Context()).Kind.String())
+		},
+		ServerError: func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprint(w, "site-aware 500")
+		},
+		Logger: slog.New(slog.NewTextHandler(writerFunc(func(p []byte) { h.logs.Write(p) }), nil)),
+	}, routes)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	h.router = r
+	return h
+}
+
+type writerFunc func([]byte)
+
+func (f writerFunc) Write(p []byte) (int, error) { f(p); return len(p), nil }
+
+func (h *harness) do(method, host, path string, mod ...func(*http.Request)) *http.Response {
+	r := httptest.NewRequest(method, "http://example.invalid"+path, nil)
+	r.Host = host
+	if method == http.MethodPost || method == http.MethodDelete {
+		r.Header.Set("Origin", "http://"+host)
+	}
+	for _, m := range mod {
+		m(r)
+	}
+	rec := httptest.NewRecorder()
+	h.router.ServeHTTP(rec, r)
+	return rec.Result()
+}
+
+func body(res *http.Response) string {
+	b, _ := io.ReadAll(res.Body)
+	return string(b)
+}
+
+func table() []route.Route {
+	return []route.Route{
+		{Method: "GET", Pattern: "/{$}", Hosts: route.OnPlatform | route.OnGroup, Role: route.Anyone, Cache: middleware.PublicPage, Handler: ok("home")},
+		{Method: "GET", Pattern: "/static/{path...}", Hosts: route.OnPlatform | route.OnGroup, Role: route.Anyone, Cache: middleware.Immutable, Handler: ok("static")},
+		{Method: "GET", Pattern: "/health", Hosts: route.OnOrigin, Role: route.Anyone, Cache: middleware.NoStore, Handler: ok("ok")},
+		{Method: "GET", Pattern: "/directory", Hosts: route.OnPlatform, Role: route.Anyone, Cache: middleware.PublicPage, Handler: ok("directory")},
+		{Method: "POST", Pattern: "/webhooks/stripe", Hosts: route.OnOrigin, Role: route.Signed, Cache: middleware.NoStore, OriginExempt: true, Handler: ok("hook")},
+		{Method: "POST", Pattern: "/groups/{slug}/join", Hosts: route.OnPlatform | route.OnGroup, Role: route.Anyone, Cache: middleware.NoStore, Handler: ok("joined")},
+		{Method: "GET", Pattern: "/rsvp/cancel/{token}", Hosts: route.OnPlatform | route.OnGroup, Role: route.Anyone, Cache: middleware.NoStore, TokenPage: true, Handler: ok("confirm")},
+		{Method: "GET", Pattern: "/boom", Hosts: route.OnPlatform | route.OnGroup, Role: route.Anyone, Cache: middleware.NoStore, Handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("boom") })},
+	}
+}
+
+// P0-ROUTES-01, -02, -07, P0-CACHE-05: every declaration is required, and
+// the documented limits on caching, webhooks, token pages, the Origin-check
+// exemption and platform-only routes are enforced when the table is built.
+func TestRouteTable_RefusesBadDeclarations(t *testing.T) {
+	good := route.Route{Method: "GET", Pattern: "/groups/{slug}", Hosts: route.OnPlatform | route.OnGroup, Role: route.Anyone, Cache: middleware.PublicPage, Handler: ok("")}
+	if err := route.Validate(good); err != nil {
+		t.Fatalf("good route refused: %v", err)
+	}
+	mut := func(f func(*route.Route)) route.Route { r := good; f(&r); return r }
+	bad := map[string]route.Route{
+		"no hosts":                    mut(func(r *route.Route) { r.Hosts = 0 }),
+		"no role":                     mut(func(r *route.Route) { r.Role = route.RoleUndeclared }),
+		"no cache policy":             mut(func(r *route.Route) { r.Cache = middleware.CacheUndeclared }),
+		"no handler":                  mut(func(r *route.Route) { r.Handler = nil }),
+		"PUT":                         mut(func(r *route.Route) { r.Method = "PUT" }),
+		"PATCH":                       mut(func(r *route.Route) { r.Method = "PATCH" }),
+		"cacheable POST":              mut(func(r *route.Route) { r.Method = "POST" }),
+		"cacheable undocumented page": mut(func(r *route.Route) { r.Pattern = "/fragments/nav" }),
+		"cacheable admin":             mut(func(r *route.Route) { r.Pattern = "/admin" }),
+		"immutable page":              mut(func(r *route.Route) { r.Cache = middleware.Immutable }),
+		"token route not flagged":     mut(func(r *route.Route) { r.Pattern = "/unsubscribe/{token}"; r.Cache = middleware.NoStore }),
+		"flagged non-token route":     mut(func(r *route.Route) { r.TokenPage = true; r.Cache = middleware.NoStore }),
+		"cacheable token page":        mut(func(r *route.Route) { r.Pattern = "/auth/verify/{token}"; r.TokenPage = true }),
+		"Origin-exempt non-webhook":   mut(func(r *route.Route) { r.Cache = middleware.NoStore; r.OriginExempt = true }),
+		"webhook on public host": {Method: "POST", Pattern: "/webhooks/ses", Hosts: route.OnPlatform | route.OnOrigin, Role: route.Signed,
+			Cache: middleware.NoStore, OriginExempt: true, Handler: ok("")},
+		"webhook not signed": {Method: "POST", Pattern: "/webhooks/ses", Hosts: route.OnOrigin, Role: route.Anyone,
+			Cache: middleware.NoStore, OriginExempt: true, Handler: ok("")},
+		"signed non-webhook":         mut(func(r *route.Route) { r.Role = route.Signed }),
+		"directory on custom domain": mut(func(r *route.Route) { r.Pattern = "/directory" }),
+		"platform admin on custom domain": {Method: "GET", Pattern: "/platform", Hosts: route.OnPlatform | route.OnGroup,
+			Role: route.Anyone, Cache: middleware.NoStore, Handler: ok("")},
+		"create form on custom domain": {Method: "GET", Pattern: "/admin/groups/new", Hosts: route.OnGroup,
+			Role: route.Anyone, Cache: middleware.NoStore, Handler: ok("")},
+		"create action on custom domain": {Method: "POST", Pattern: "/admin/groups", Hosts: route.OnGroup,
+			Role: route.Anyone, Cache: middleware.NoStore, Handler: ok("")},
+	}
+	for name, r := range bad {
+		if err := route.Validate(r); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+// A route can't be declared twice, and can't name a role nothing enforces
+// yet (sessions arrive in Phase 1).
+func TestRouteTable_BuildRefusesDuplicatesAndUnenforcedRoles(t *testing.T) {
+	cfg := route.Config{Resolver: &site.Resolver{Domains: site.NewDomains(public, origin)}, ClientIP: func(*http.Request) netip.Addr { return netip.Addr{} },
+		NotFound: func(http.ResponseWriter, *http.Request) {}, ServerError: func(http.ResponseWriter, *http.Request) {}}
+	r := route.Route{Method: "GET", Pattern: "/{$}", Hosts: route.OnPlatform, Role: route.Anyone, Cache: middleware.PublicPage, Handler: ok("")}
+	if _, err := route.Build(cfg, []route.Route{r, r}); err == nil {
+		t.Error("duplicate accepted")
+	}
+	for _, role := range []route.Role{route.User, route.Member, route.Organizer, route.Owner, route.PlatformAdmin} {
+		r.Role = role
+		if _, err := route.Build(cfg, []route.Route{r}); err == nil {
+			t.Errorf("role %s accepted without enforcement", role)
+		}
+	}
+}
+
+// P0-SITE-03 / decisions.md "Error pages": a host with no site gets the bare
+// 404 on every method and path, no-store, and no handler runs.
+func TestRouter_UnknownHostGetsBare404(t *testing.T) {
+	h := build(t, table())
+	for _, host := range []string{unknown, "localhost:8080.", "127.0.0.1:8080", ""} {
+		for _, m := range []string{"GET", "POST", "DELETE", "HEAD"} {
+			for _, p := range []string{"/", "/health", "/static/css/output.css", "/webhooks/stripe", "/x"} {
+				res := h.do(m, host, p)
+				b := body(res)
+				if res.StatusCode != 404 || res.Header.Get("Cache-Control") != "no-store, private" {
+					t.Errorf("%s %s%s: %d %q", m, host, p, res.StatusCode, res.Header.Get("Cache-Control"))
+				}
+				if m != "HEAD" && b != route.BareNotFoundBody {
+					t.Errorf("%s %s%s: body %q", m, host, p, b)
+				}
+			}
+		}
+	}
+	for k, n := range h.ran {
+		if n.Load() != 0 {
+			t.Errorf("%s ran for an unknown host", k)
+		}
+	}
+	if h.notFound.Load() != 0 {
+		t.Error("site-aware 404 used for an unknown host")
+	}
+}
+
+// P0-ROUTES-05, -06, P0-SECURITY-08: host gating comes from the table; a
+// route on a host kind it doesn't declare is a 404 and never runs. The
+// origin host serves only /health and /webhooks/*, with the bare 404.
+func TestRouter_HostGatingFromTable(t *testing.T) {
+	h := build(t, table())
+	type c struct {
+		method, host, path string
+		status             int
+	}
+	cases := []c{
+		{"GET", public, "/", 200}, {"GET", hikers, "/", 200}, {"GET", origin, "/", 404},
+		{"GET", public, "/directory", 200}, {"GET", hikers, "/directory", 404}, {"GET", origin, "/directory", 404},
+		{"GET", origin, "/health", 200}, {"GET", public, "/health", 404}, {"GET", hikers, "/health", 404},
+		{"POST", origin, "/webhooks/stripe", 200}, {"POST", public, "/webhooks/stripe", 404}, {"POST", hikers, "/webhooks/stripe", 404},
+		{"GET", public, "/static/css/output.css", 200}, {"GET", hikers, "/static/x.js", 200}, {"GET", origin, "/static/x.js", 404},
+		{"GET", origin, "/webhooks", 404}, {"GET", origin, "/webhooksx", 404}, {"GET", origin, "/healthz", 404},
+	}
+	for _, c := range cases {
+		res := h.do(c.method, c.host, c.path)
+		if res.StatusCode != c.status {
+			t.Errorf("%s %s%s: %d, want %d", c.method, c.host, c.path, res.StatusCode, c.status)
+		}
+		if c.host == origin && c.status == 404 && body(res) != route.BareNotFoundBody {
+			t.Errorf("%s %s%s: origin 404 isn't bare", c.method, c.host, c.path)
+		}
+	}
+	if n := h.ran["GET /directory"].Load(); n != 1 {
+		t.Errorf("/directory ran %d times, want only the platform request", n)
+	}
+}
+
+// Critic addition: a path served for another method is a 404, never a 405
+// with an Allow header that reveals the route.
+func TestRouter_WrongMethodIs404Not405(t *testing.T) {
+	h := build(t, table())
+	for _, c := range [][3]string{{"POST", public, "/"}, {"GET", origin, "/webhooks/stripe"}, {"DELETE", public, "/directory"}, {"POST", hikers, "/directory"}} {
+		res := h.do(c[0], c[1], c[2])
+		if res.StatusCode != 404 || res.Header.Get("Allow") != "" {
+			t.Errorf("%v: %d Allow=%q", c, res.StatusCode, res.Header.Get("Allow"))
+		}
+	}
+}
+
+// Critic addition: non-canonical paths never reach a handler or a redirect.
+func TestRouter_NonCanonicalPathsAre404(t *testing.T) {
+	h := build(t, table())
+	for _, p := range []string{"//", "//directory", "/directory/", "/static", "/static/", "/static/../health", "/static/%2e%2e/health", "/./directory", "/static//x.js"} {
+		for _, host := range []string{public, origin} {
+			res := h.do("GET", host, p)
+			if res.StatusCode != 404 || res.Header.Get("Location") != "" {
+				t.Errorf("%s%s: %d Location=%q", host, p, res.StatusCode, res.Header.Get("Location"))
+			}
+		}
+	}
+	if n := h.ran["GET /health"].Load(); n != 0 {
+		t.Errorf("/health reached through a dot segment %d times", n)
+	}
+}
+
+// P0-SECURITY-01..07 at the router: the Origin check runs before the
+// handler on every POST/DELETE that isn't exempt; webhooks are exempt; GET
+// is never checked; a request refused earlier (unknown host, undeclared
+// route) gets 404, not 403.
+func TestRule5_RouterChecksOriginBeforeHandler(t *testing.T) {
+	h := build(t, table())
+	foreign := func(r *http.Request) { r.Header.Set("Origin", "https://evil.test") }
+	none := func(r *http.Request) { r.Header.Del("Origin") }
+
+	if res := h.do("POST", public, "/groups/x/join"); res.StatusCode != 200 {
+		t.Errorf("same-origin POST: %d", res.StatusCode)
+	}
+	for name, mod := range map[string]func(*http.Request){"foreign": foreign, "missing": none} {
+		res := h.do("POST", hikers, "/groups/x/join", mod)
+		if res.StatusCode != 403 || body(res) != middleware.OriginRefusedBody || res.Header.Get("Cache-Control") != "no-store, private" {
+			t.Errorf("%s origin: %d %q", name, res.StatusCode, res.Header.Get("Cache-Control"))
+		}
+	}
+	if n := h.ran["POST /groups/{slug}/join"].Load(); n != 1 {
+		t.Errorf("join handler ran %d times, want 1", n)
+	}
+	if !strings.Contains(h.logs.String(), "origin check refused request") {
+		t.Error("refusal not logged")
+	}
+	// Webhooks are exempt (Rule 11).
+	if res := h.do("POST", origin, "/webhooks/stripe", foreign); res.StatusCode != 200 {
+		t.Errorf("webhook with foreign origin: %d", res.StatusCode)
+	}
+	if res := h.do("POST", origin, "/webhooks/stripe", none); res.StatusCode != 200 {
+		t.Errorf("webhook without origin: %d", res.StatusCode)
+	}
+	// Earlier stages win.
+	if res := h.do("POST", unknown, "/groups/x/join", foreign); res.StatusCode != 404 {
+		t.Errorf("unknown host: %d", res.StatusCode)
+	}
+	if res := h.do("POST", public, "/nope", foreign); res.StatusCode != 404 {
+		t.Errorf("undeclared route: %d", res.StatusCode)
+	}
+	// GET is not checked.
+	if res := h.do("GET", public, "/", foreign); res.StatusCode != 200 {
+		t.Errorf("GET with foreign origin: %d", res.StatusCode)
+	}
+}
+
+// P0-CACHE-01, -02, -06: the declared policy is applied; everything else,
+// including 404s, panics and refusals, is no-store.
+func TestRule7_RouterAppliesDeclaredCachePolicy(t *testing.T) {
+	h := build(t, table())
+	cases := []struct {
+		method, host, path, want string
+	}{
+		{"GET", public, "/", "public, s-maxage=300"},
+		{"GET", hikers, "/", "public, s-maxage=300"},
+		{"GET", public, "/static/css/output.css", "public, max-age=31536000, immutable"},
+		{"GET", origin, "/health", "no-store, private"},
+		{"GET", public, "/missing", "no-store, private"},
+		{"GET", public, "/boom", "no-store, private"},
+		{"POST", public, "/groups/x/join", "no-store, private"},
+		{"GET", public, "/rsvp/cancel/abc", "no-store, private"},
+	}
+	for _, c := range cases {
+		res := h.do(c.method, c.host, c.path)
+		if got := res.Header.Get("Cache-Control"); got != c.want {
+			t.Errorf("%s %s%s: %q, want %q", c.method, c.host, c.path, got, c.want)
+		}
+	}
+	res := h.do("GET", public, "/rsvp/cancel/abc")
+	if got := res.Header.Get("Referrer-Policy"); got != "same-origin" {
+		t.Errorf("token page Referrer-Policy %q", got)
+	}
+	res = h.do("GET", public, "/boom")
+	if res.StatusCode != 500 || body(res) != "site-aware 500" {
+		t.Errorf("panic: %d", res.StatusCode)
+	}
+}
+
+// The site-aware 404 serves the platform and custom domains.
+func TestRouter_SiteAware404OnPlatformAndCustomDomain(t *testing.T) {
+	h := build(t, table())
+	for host, kind := range map[string]string{public: "platform", hikers: "group"} {
+		res := h.do("GET", host, "/nope")
+		if b := body(res); res.StatusCode != 404 || b != "site-aware 404 for "+kind {
+			t.Errorf("%s: %d %q", host, res.StatusCode, b)
+		}
+	}
+}
+
+// P0-SITE-01: the site is resolved before the handler and available to it;
+// the client IP is on the context.
+func TestRouter_HandlerSeesSiteAndClientIP(t *testing.T) {
+	var got site.Context
+	var ip netip.Addr
+	routes := []route.Route{{Method: "GET", Pattern: "/{$}", Hosts: route.OnPlatform | route.OnGroup, Role: route.Anyone, Cache: middleware.PublicPage,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			got = site.FromContext(r.Context())
+			ip = middleware.ClientIPFrom(r.Context())
+		})}}
+	h := build(t, routes)
+	h.do("GET", hikers, "/", func(r *http.Request) { r.RemoteAddr = "198.51.100.20:1234" })
+	if got.Kind != site.KindGroup || got.Host != hikers {
+		t.Errorf("site %+v", got)
+	}
+	if ip != netip.MustParseAddr("198.51.100.20") {
+		t.Errorf("client IP %s", ip)
+	}
+}

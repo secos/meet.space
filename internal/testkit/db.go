@@ -75,7 +75,7 @@ func NewDB(t testing.TB) *DB {
 		t.Fatalf("test database template: %v (is `docker compose up -d db` running?)", tmplErr)
 	}
 	ctx := context.Background()
-	name := testDBPrefix + strconv.FormatInt(time.Now().Unix(), 10) + "_" + randHex(6)
+	name := testDBPrefix + strconv.FormatInt(time.Now().Unix(), 10) + "_" + RandHex(6)
 	admin := adminConn(t)
 	defer admin.Close(ctx)
 	if err := withLock(ctx, admin, func() error {
@@ -109,7 +109,7 @@ func NewDB(t testing.TB) *DB {
 func NewEmptyDB(t testing.TB) (name, url string) {
 	t.Helper()
 	ctx := context.Background()
-	name = testDBPrefix + strconv.FormatInt(time.Now().Unix(), 10) + "_" + randHex(6)
+	name = testDBPrefix + strconv.FormatInt(time.Now().Unix(), 10) + "_" + RandHex(6)
 	admin := adminConn(t)
 	defer admin.Close(ctx)
 	if _, err := admin.Exec(ctx, "CREATE DATABASE "+pgx.Identifier{name}.Sanitize()); err != nil {
@@ -273,7 +273,8 @@ func migrationsHash() (string, error) {
 	return hex.EncodeToString(h.Sum(nil))[:16], nil
 }
 
-func randHex(n int) string {
+// RandHex returns n random bytes, hex-encoded.
+func RandHex(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)

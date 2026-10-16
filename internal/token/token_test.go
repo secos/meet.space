@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"meet.space/internal/config"
-	_ "meet.space/internal/testkit" // network guard
+	_ "meet.space/internal/testkit/nonet" // network guard
 	"meet.space/internal/token"
 )
 

@@ -1,0 +1,8 @@
+# Starting point; finalized in the Phase 9 spike (development-plan.md).
+# The origin host comes from config (decisions.md question 6). SNS and
+# Stripe call it directly, so this block must stay reachable without the
+# CDN. Whether Caddy should trust Bunny's edge ranges for the client IP
+# (decisions.md "Client IP") is also settled in the spike.
+{$ORIGIN_HOST} {
+	reverse_proxy app:8080
+}

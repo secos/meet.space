@@ -1,4 +1,7 @@
-package testkit
+// Package nonet stops tests from touching the network. Importing it (any
+// test package does, through testkit) replaces the default HTTP transport
+// and resolver before any test runs.
+package nonet
 
 import (
 	"context"

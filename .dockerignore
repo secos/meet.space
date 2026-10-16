@@ -1,0 +1,10 @@
+.git
+bin/
+docs/
+e2e/
+uploads/
+static/css/output.css
+.env
+.env.*
+.teak
+CLAUDE.md

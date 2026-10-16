@@ -1,0 +1,41 @@
+name: meetspace
+
+services:
+  app:
+    image: meetspace:latest
+    restart: always
+    env_file: .env          # Same variables as dev, production values; no AWS keys (the instance role supplies them)
+    depends_on:
+      db: { condition: service_healthy }
+
+  db:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: meetspace
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD}
+      POSTGRES_DB: meetspace
+    # Postgres data lives on its own EBS volume, mounted at PGDATA_DIR
+    # (decisions.md: compute and database rows), so the instance can be
+    # replaced without losing it. Provisioned in Phase 12.
+    volumes: ["${PGDATA_DIR:-/srv/pgdata}:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U meetspace"]
+      interval: 10s
+      retries: 5
+
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    ports: ["80:80", "443:443"]
+    environment:
+      ORIGIN_HOST: ${ORIGIN_HOST:?set ORIGIN_HOST}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [app]
+
+volumes:
+  caddy_data:
+  caddy_config:
