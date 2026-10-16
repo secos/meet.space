@@ -31,8 +31,11 @@ CREATE TABLE magic_links (
     purpose       TEXT NOT NULL DEFAULT 'auth'
                   CHECK (purpose IN ('auth', 'join_group', 'invite_coorganizer')),
     metadata      JSONB,                                 -- e.g. {"group_id": "..."}
+    -- A single leading "/", then no "/" or "\" straight after it, and no "\" or control
+    -- character anywhere: browsers read "\" as "/" and drop tabs and line breaks, so
+    -- "/\evil.com" would leave the site (decisions.md "Return paths").
     redirect_path TEXT CHECK (redirect_path IS NULL
-                              OR (redirect_path LIKE '/%' AND redirect_path NOT LIKE '//%')),
+                              OR redirect_path ~ '^/([^/\\[:cntrl:]][^\\[:cntrl:]]*)?$'),
     expires_at    TIMESTAMPTZ NOT NULL,
     used_at       TIMESTAMPTZ,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()

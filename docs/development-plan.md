@@ -172,8 +172,11 @@ CREATE TABLE magic_links (
     purpose       TEXT NOT NULL DEFAULT 'auth'
                   CHECK (purpose IN ('auth', 'join_group', 'invite_coorganizer')),
     metadata      JSONB,                                 -- e.g. {"group_id": "..."}
+    -- A single leading "/", then no "/" or "\" straight after it, and no "\" or control
+    -- character anywhere: browsers read "\" as "/" and drop tabs and line breaks, so
+    -- "/\evil.com" would leave the site (decisions.md "Return paths").
     redirect_path TEXT CHECK (redirect_path IS NULL
-                              OR (redirect_path LIKE '/%' AND redirect_path NOT LIKE '//%')),
+                              OR redirect_path ~ '^/([^/\\[:cntrl:]][^\\[:cntrl:]]*)?$'),
     expires_at    TIMESTAMPTZ NOT NULL,
     used_at       TIMESTAMPTZ,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -562,7 +565,7 @@ GET  /health                            → DB ping (reachable on the origin hos
 
 These apply everywhere and are checked in code review.
 
-1. **Return paths:** only relative paths starting with a single `/` are accepted (also enforced by a CHECK constraint). Anything else falls back to `/admin`.
+1. **Return paths:** only relative paths starting with a single `/` are accepted, with no backslash or control character anywhere (browsers turn `/\evil.com` and `/<tab>/evil.com` into `//evil.com`). Also enforced by a CHECK constraint. Anything else falls back to `/admin`.
 2. **Hostnames in emails:** links in emails are only built for `PUBLIC_HOST` or an **active** custom domain from the site cache, never from an unvalidated `Host` header.
 3. **Magic links:** GET shows a confirmation page; only POST consumes the token. Tokens are single-use and expire after 15 minutes. The verifying request's hostname must match `magic_links.host`.
 4. **Sessions:** host-only cookies (no `Domain` attribute), `HttpOnly`, `Secure`, `SameSite=Lax`, 30-day expiry. A session is only honored on the hostname stored in `sessions.host`.

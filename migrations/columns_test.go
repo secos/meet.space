@@ -391,19 +391,19 @@ func TestGroupCustomDomain_RejectsUppercase(t *testing.T) {
 // redirect_path is NULL or a relative path starting with a single "/".
 // Absolute URLs, scheme-relative "//host" and "///host", other schemes,
 // bare words, a leading space and the empty string are refused by the
-// CHECK.
-// OPEN (G-20): the documents don't say whether paths with a backslash
-// ("/\evil.com") or control characters must be refused here; they are not
-// tested.
+// CHECK. So is any backslash or control character, which browsers turn
+// into "//host" (decisions.md "Return paths").
 func TestRule1_RedirectPathCheckAcceptsOnlySingleSlashRelativePaths(t *testing.T) {
 	t.Parallel()
 	f := newFx(t)
-	for _, ok := range []any{nil, "/", "/admin", "/groups/x?y=1#z"} {
+	for _, ok := range []any{nil, "/", "/admin", "/groups/x?y=1#z", "/a/b/", "/a//b", "/%5Cevil.com", "/café", "/a b"} {
 		if err := f.insert("magic_links", f.row("magic_links", "redirect_path", ok)); err != nil {
 			t.Errorf("redirect_path %#v refused: %v", ok, err)
 		}
 	}
-	for _, bad := range []string{"", "admin", " /admin", "https://evil.com", "javascript:alert(1)", "//evil.com", "///evil.com"} {
+	for _, bad := range []string{"", "admin", " /admin", "https://evil.com", "javascript:alert(1)", "//evil.com", "///evil.com",
+		`/\evil.com`, `\\evil.com`, `\/evil.com`, `/admin\x`, `/a\`,
+		"/\t/evil.com", "/\n/evil.com", "/\r/evil.com", "/admin\r\nSet-Cookie: x=1", "/a\x7f", "/a\x01", "/a\u0085"} {
 		t.Run(fmt.Sprintf("%q", bad), func(t *testing.T) {
 			f := f.on(t)
 			testkit.WantPgError(t, f.insert("magic_links", f.row("magic_links", "redirect_path", bad)),
