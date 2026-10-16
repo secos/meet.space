@@ -319,3 +319,104 @@ func TestGroupHosts(t *testing.T) {
 		t.Errorf("no domain: %v", got)
 	}
 }
+
+// decisions.md "Host matching": a trailing dot or an explicit default port
+// is not tidied up; it is no site, like an unknown host. Checked with a
+// production-shaped config (hosts without a port) and the dev config (port
+// included, where the trailing dot sits before the port).
+func TestResolve_TrailingDotAndDefaultPortAreNotTidied(t *testing.T) {
+	g := uuid.Must(uuid.NewV7())
+	prod := site.NewDomains("meet.space", "origin.meet.space")
+	prod.Set(map[string]uuid.UUID{"hikers.example.org": g})
+	pr := &site.Resolver{PublicHost: "meet.space", OriginHost: "origin.meet.space", HostSource: "host", Domains: prod}
+	for host, want := range map[string]site.Kind{
+		"meet.space":         site.KindPlatform,
+		"Meet.Space":         site.KindPlatform,
+		"origin.meet.space":  site.KindOrigin,
+		"hikers.example.org": site.KindGroup,
+	} {
+		if got := pr.Resolve(req(host)).Kind; got != want {
+			t.Errorf("prod %q: got %s, want %s", host, got, want)
+		}
+	}
+	for _, host := range []string{
+		"meet.space.", "MEET.SPACE.", "meet.space:443", "meet.space:80", "meet.space.:443",
+		"origin.meet.space.", "origin.meet.space:443", "origin.meet.space:80",
+		"hikers.example.org.", "hikers.example.org:443", "hikers.example.org:80",
+	} {
+		if got := pr.Resolve(req(host)); got != (site.Context{}) {
+			t.Errorf("prod %q: got %+v, want no site", host, got)
+		}
+	}
+	d := site.NewDomains(public, origin)
+	d.Set(map[string]uuid.UUID{hikers: g})
+	dr := resolver(d, "host")
+	for _, host := range []string{"localhost.:8080", "origin.localhost.:8080", "hikers.localhost.:8080"} {
+		if got := dr.Resolve(req(host)); got != (site.Context{}) {
+			t.Errorf("dev %q: got %+v, want no site", host, got)
+		}
+	}
+}
+
+// Resolve's own guarantee, separate from the Domains reserved-host filter:
+// PUBLIC_HOST and ORIGIN_HOST are matched before the custom-domain map, so
+// even a map that holds them can't capture them. The map is built with
+// different reserved hosts so its filter can't mask the resolver's order.
+func TestResolve_PlatformAndOriginMatchedBeforeCustomDomains(t *testing.T) {
+	d := site.NewDomains("reserved-a.invalid", "reserved-b.invalid")
+	d.Set(map[string]uuid.UUID{public: uuid.Must(uuid.NewV7()), origin: uuid.Must(uuid.NewV7())})
+	if _, ok := d.Lookup(public); !ok {
+		t.Fatal("setup: the map should hold the public host for this test")
+	}
+	r := resolver(d, "host")
+	if got := r.Resolve(req(public)); got != (site.Context{Kind: site.KindPlatform, Host: public}) {
+		t.Errorf("public host captured by the map: %+v", got)
+	}
+	if got := r.Resolve(req(origin)); got != (site.Context{Kind: site.KindOrigin, Host: origin}) {
+		t.Errorf("origin host captured by the map: %+v", got)
+	}
+}
+
+// Security Rule 2: the platform and origin hosts never enter the domain map
+// through Set either (any case), so no group can get links or CDN purges
+// built for them.
+func TestRule2_DomainsSetNeverHoldsReservedHosts(t *testing.T) {
+	a, b, c, g := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
+	d := site.NewDomains(public, origin)
+	d.Set(map[string]uuid.UUID{public: a, origin: b, "ORIGIN.localhost:8080": c, hikers: g})
+	for _, h := range []string{public, origin} {
+		if id, ok := d.Lookup(h); ok {
+			t.Errorf("reserved host %q in the map (group %s)", h, id)
+		}
+	}
+	l := links(d)
+	for _, id := range []uuid.UUID{a, b, c} {
+		if h, ok := d.ActiveHost(id); ok {
+			t.Errorf("group %s holds reserved host %q", id, h)
+		}
+		if got := l.BaseURL(id); got != "http://localhost:8080" {
+			t.Errorf("BaseURL for a group claiming a reserved host: %q", got)
+		}
+		if got := l.GroupHosts(id); len(got) != 1 || got[0] != public {
+			t.Errorf("GroupHosts for a group claiming a reserved host: %v", got)
+		}
+	}
+	if id, ok := d.Lookup(hikers); !ok || id != g {
+		t.Errorf("ordinary domain dropped: %v %v", id, ok)
+	}
+}
+
+// Security Rule 2: the platform's current-site base URL is PUBLIC_BASE_URL,
+// built from configuration, never from the request's host. With a base URL
+// whose host differs from the context's, the context's host must not leak.
+func TestRule2_PlatformCurrentBaseURLComesFromConfigNotRequestHost(t *testing.T) {
+	d := site.NewDomains(public, origin)
+	l := site.Links{Scheme: "https", PublicBaseURL: "https://meet.example/", PublicHost: public, Domains: d}
+	if got, err := l.CurrentBaseURL(site.Context{Kind: site.KindPlatform, Host: public}); err != nil || got != "https://meet.example" {
+		t.Errorf("platform: %q, %v; want PUBLIC_BASE_URL", got, err)
+	}
+	got, err := l.CurrentBaseURL(site.Context{Kind: site.KindPlatform, Host: "evil.test"})
+	if err == nil && got != "https://meet.example" {
+		t.Errorf("platform context naming another host: %q, want PUBLIC_BASE_URL or an error", got)
+	}
+}

@@ -513,3 +513,22 @@ func TestRouter_HandlerSeesSiteAndClientIP(t *testing.T) {
 		t.Errorf("client IP %s", ip)
 	}
 }
+
+// Security Rule 11: a webhook is declared on the origin host and nowhere
+// else: every other combination of hosts, including any that adds the
+// platform or a custom domain to the origin, is refused.
+func TestRule11_WebhooksDeclaredOnlyOnOriginHost(t *testing.T) {
+	for _, pattern := range []string{"/webhooks/stripe", "/webhooks/ses"} {
+		for h := route.Hosts(1); h <= route.OnPlatform|route.OnGroup|route.OnOrigin; h++ {
+			rt := route.Route{Method: "POST", Pattern: pattern, Hosts: h, Role: route.Signed,
+				Cache: middleware.NoStore, OriginExempt: true, Handler: ok("")}
+			err := route.Validate(rt)
+			if h == route.OnOrigin && err != nil {
+				t.Errorf("%s on %s refused: %v", pattern, h, err)
+			}
+			if h != route.OnOrigin && err == nil {
+				t.Errorf("%s on %s accepted", pattern, h)
+			}
+		}
+	}
+}
