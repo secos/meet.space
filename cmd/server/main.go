@@ -1,6 +1,7 @@
 // Command server runs meet.space.
 //
-//	server                 serve HTTP and run the background workers
+//	server                 serve HTTP and run the background workers (the
+//	                       email outbox poller)
 //	server migrate up      apply pending migrations, then exit
 //	server migrate down    revert the latest migration, then exit
 //	server seed-dev        create the local test group (development only)
@@ -25,6 +26,7 @@ import (
 	"meet.space/internal/clock"
 	"meet.space/internal/config"
 	"meet.space/internal/database"
+	"meet.space/internal/email"
 	"meet.space/internal/migrate"
 	"meet.space/internal/site"
 	"meet.space/internal/tmpl"
@@ -106,6 +108,32 @@ func serve(ctx context.Context, cfg config.Config, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+
+	// The SES sender lands in Phase 6. Until then a configured SES_REGION
+	// is refused rather than quietly writing real users' login links to
+	// the log.
+	if cfg.SESRegion != "" {
+		return errors.New("SES_REGION is set, but the SES sender is not built yet (Phase 6)")
+	}
+	outbox := &email.Outbox{
+		Pool:       pool,
+		Sender:     &email.LogSender{W: stdout},
+		Clock:      clock.Real{},
+		Logger:     logger,
+		FromAuth:   cfg.SESFromAuth,
+		FromNotify: cfg.SESFromNotify,
+	}
+	outboxCtx, stopOutbox := context.WithCancel(ctx)
+	outboxDone := make(chan struct{})
+	go func() {
+		defer close(outboxDone)
+		outbox.Run(outboxCtx)
+	}()
+	// Runs before pool.Close: a send in progress finishes first.
+	defer func() {
+		stopOutbox()
+		<-outboxDone
+	}()
 
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,

@@ -3,9 +3,13 @@ package main
 import (
 	"bytes"
 	"context"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"meet.space/internal/clock/clocktest"
+	"meet.space/internal/email"
 	"meet.space/internal/migrate"
 	"meet.space/internal/testkit"
 	"meet.space/internal/testkit/apptest"
@@ -98,6 +102,80 @@ func TestSeedDev(t *testing.T) {
 	}
 	if err := run(context.Background(), []string{"seed-dev"}, environ(db.URL, "ENV=production"), &out, &out); err == nil {
 		t.Error("seed-dev ran with ENV=production")
+	}
+}
+
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.b.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.b.String()
+}
+
+// Plan Phase 0 step 10: serving runs the outbox poller, which sends queued
+// email through the dev sender (SES_REGION empty) to the server's output
+// with the configured From address, and stops with the server.
+func TestServe_RunsTheOutbox(t *testing.T) {
+	db := testkit.NewDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	out := &syncBuffer{}
+	done := make(chan error, 1)
+	go func() {
+		done <- run(ctx, nil, environ(db.URL, "LISTEN_ADDR=127.0.0.1:0", "STATIC_DIR=../../static", "TEMPLATE_DIR=../../templates"), out, out)
+	}()
+
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := email.Enqueue(ctx, tx, clocktest.New(time.Now().Add(-time.Minute)), email.Outgoing{
+		Stream: email.StreamAuth, Kind: "magic_link", To: "ann@example.com", FromName: "Hikers",
+		Subject: "Your login link", HTML: "<p>x</p>", Text: "verify/abc123", DedupeKey: "serve-test",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var status string
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if err := db.Pool.QueryRow(ctx, `SELECT status FROM email_outbox WHERE dedupe_key = 'serve-test'`).Scan(&status); err != nil {
+			t.Fatal(err)
+		}
+		if status == "sent" {
+			break
+		}
+	}
+	if status != "sent" {
+		select {
+		case err := <-done:
+			t.Fatalf("serve returned early: %v\n%s", err, out.String())
+		default:
+		}
+		t.Fatalf("queued email is %s after 10s of serving\n%s", status, out.String())
+	}
+	if s := out.String(); !strings.Contains(s, "From: Hikers <login@auth.example.test>") || !strings.Contains(s, "verify/abc123") {
+		t.Errorf("dev sender output lacks the email:\n%s", s)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("serve returned %v", err)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("serve did not stop")
 	}
 }
 
