@@ -44,6 +44,13 @@ func ok(body string) http.Handler {
 
 func build(t *testing.T, routes []route.Route) *harness {
 	t.Helper()
+	return buildWithHostSource(t, routes, "host")
+}
+
+// buildWithHostSource builds the router with HOST_SOURCE set to "host" or
+// the name of the header that carries the visitor's host.
+func buildWithHostSource(t *testing.T, routes []route.Route, hostSource string) *harness {
+	t.Helper()
 	h := &harness{ran: map[string]*atomic.Int32{}, logs: &strings.Builder{}}
 	for i := range routes {
 		n := &atomic.Int32{}
@@ -57,7 +64,7 @@ func build(t *testing.T, routes []route.Route) *harness {
 	d := site.NewDomains(public, origin)
 	d.Set(map[string]uuid.UUID{hikers: uuid.Must(uuid.NewV7())})
 	r, err := route.Build(route.Config{
-		Resolver: &site.Resolver{PublicHost: public, OriginHost: origin, HostSource: "host", Domains: d},
+		Resolver: &site.Resolver{PublicHost: public, OriginHost: origin, HostSource: hostSource, Domains: d},
 		ClientIP: func(r *http.Request) netip.Addr { return middleware.ClientIP(r, nil, "X-Forwarded-For") },
 		NotFound: func(w http.ResponseWriter, r *http.Request) {
 			h.notFound.Add(1)
@@ -303,6 +310,105 @@ func TestRule5_RouterChecksOriginBeforeHandler(t *testing.T) {
 	// GET is not checked.
 	if res := h.do("GET", public, "/", foreign); res.StatusCode != 200 {
 		t.Errorf("GET with foreign origin: %d", res.StatusCode)
+	}
+}
+
+// decisions.md "Origin check": DELETE is checked exactly like POST.
+func TestRule5_RouterChecksOriginOnDelete(t *testing.T) {
+	routes := append(table(), route.Route{Method: "DELETE", Pattern: "/groups/{slug}/rsvp", Hosts: route.OnPlatform | route.OnGroup,
+		Role: route.Anyone, Cache: middleware.NoStore, Handler: ok("deleted")})
+	h := build(t, routes)
+	for _, host := range []string{public, hikers} {
+		if res := h.do("DELETE", host, "/groups/x/rsvp"); res.StatusCode != 200 {
+			t.Errorf("same-origin DELETE on %s: %d", host, res.StatusCode)
+		}
+		for name, mod := range map[string]func(*http.Request){
+			"foreign": func(r *http.Request) { r.Header.Set("Origin", "https://evil.test") },
+			"missing": func(r *http.Request) { r.Header.Del("Origin") },
+		} {
+			res := h.do("DELETE", host, "/groups/x/rsvp", mod)
+			if res.StatusCode != 403 || body(res) != middleware.OriginRefusedBody || res.Header.Get("Cache-Control") != "no-store, private" {
+				t.Errorf("%s origin, DELETE on %s: %d %q", name, host, res.StatusCode, res.Header.Get("Cache-Control"))
+			}
+		}
+	}
+	if n := h.ran["DELETE /groups/{slug}/rsvp"].Load(); n != 2 {
+		t.Errorf("DELETE handler ran %d times, want 2 (the same-origin requests)", n)
+	}
+}
+
+// decisions.md "Origin check": the router compares with the host of the
+// site the request resolved to, so each site accepts only its own origin;
+// the platform, a custom domain and the origin host are strangers to each
+// other.
+func TestRule5_RouterComparesWithTheRequestsOwnSite(t *testing.T) {
+	h := build(t, table())
+	for _, host := range []string{public, hikers} {
+		for _, from := range []string{public, hikers, origin} {
+			res := h.do("POST", host, "/groups/x/join", func(r *http.Request) { r.Header.Set("Origin", "http://"+from) })
+			want := 403
+			if from == host {
+				want = 200
+			}
+			if res.StatusCode != want {
+				t.Errorf("POST %s with Origin http://%s: %d, want %d", host, from, res.StatusCode, want)
+			}
+		}
+	}
+}
+
+// decisions.md "Origin check" and "HOST_SOURCE header edge cases": in
+// header mode the Host header names the origin and the visitor's host
+// comes from the configured header. The Origin check uses the resolved
+// visitor host, never the Host header.
+func TestRule5_RouterUsesResolvedHostInHeaderMode(t *testing.T) {
+	h := buildWithHostSource(t, table(), "X-Visitor-Host")
+	post := func(visitor, from string) *http.Response {
+		return h.do("POST", origin, "/groups/x/join", func(r *http.Request) {
+			r.Header.Set("X-Visitor-Host", visitor)
+			r.Header.Set("Origin", from)
+		})
+	}
+	for _, v := range []string{public, hikers} {
+		if res := post(v, "http://"+v); res.StatusCode != 200 {
+			t.Errorf("visitor %s with its own Origin: %d, want 200", v, res.StatusCode)
+		}
+		if res := post(v, "http://"+origin); res.StatusCode != 403 {
+			t.Errorf("visitor %s with an Origin naming the Host header: %d, want 403", v, res.StatusCode)
+		}
+	}
+}
+
+// decisions.md "Origin check": only POST and DELETE are checked; HEAD, like
+// GET, never is.
+func TestRule5_RouterDoesNotCheckGetOrHead(t *testing.T) {
+	h := build(t, table())
+	for _, m := range []string{"GET", "HEAD"} {
+		for name, mod := range map[string]func(*http.Request){
+			"foreign": func(r *http.Request) { r.Header.Set("Origin", "https://evil.test") },
+			"missing": func(r *http.Request) { r.Header.Del("Origin") },
+		} {
+			if res := h.do(m, hikers, "/", mod); res.StatusCode != 200 {
+				t.Errorf("%s with %s origin: %d", m, name, res.StatusCode)
+			}
+		}
+	}
+}
+
+// decisions.md "Origin check": a refusal is logged as a warning with the
+// host, method, path, Origin and Referer.
+func TestRule5_RouterLogsRefusalDetails(t *testing.T) {
+	h := build(t, table())
+	h.do("POST", hikers, "/groups/x/join", func(r *http.Request) {
+		r.Header.Set("Origin", "https://evil.test")
+		r.Header.Set("Referer", "https://evil.test/page")
+	})
+	log := h.logs.String()
+	for _, want := range []string{"level=WARN", "origin check refused request", "host=" + hikers, "method=POST", "path=/groups/x/join",
+		"origin=[https://evil.test]", "referer=[https://evil.test/page]"} {
+		if !strings.Contains(log, want) {
+			t.Errorf("log %q lacks %q", log, want)
+		}
 	}
 }
 

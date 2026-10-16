@@ -99,6 +99,54 @@ func TestRule5_RepeatedOriginIsRefused(t *testing.T) {
 	}
 }
 
+// P0-SECURITY-03 / decisions.md "Origin check": hosts are compared whole,
+// never by prefix. The dev host's port makes look-alike hosts fail to
+// parse at all, so this uses production-shaped hosts with no port, and
+// ports that extend the dev port.
+func TestRule5_HostIsComparedWholeNotByPrefix(t *testing.T) {
+	cases := []struct{ from, current string }{
+		{"https://meet.space.evil.test", "meet.space"},
+		{"https://meet.spacex", "meet.space"},
+		{"https://meet.spac", "meet.space"},
+		{"https://meet.space:8443", "meet.space"},
+		{"https://hikers.example.com.evil.test", "hikers.example.com"},
+		{"http://localhost:80800", "localhost:8080"},
+		{"http://hikers.localhost:80801", "hikers.localhost:8080"},
+	}
+	for _, c := range cases {
+		if err := middleware.CheckOrigin(post([]string{c.from}, nil), c.current); err == nil {
+			t.Errorf("Origin %q allowed on %q", c.from, c.current)
+		}
+		if err := middleware.CheckOrigin(post(nil, []string{c.from + "/"}), c.current); err == nil {
+			t.Errorf("Referer %q allowed on %q", c.from+"/", c.current)
+		}
+	}
+	for _, c := range [][2]string{{"https://meet.space", "meet.space"}, {"https://hikers.example.com", "hikers.example.com"}} {
+		if err := middleware.CheckOrigin(post([]string{c[0]}, nil), c[1]); err != nil {
+			t.Errorf("Origin %q refused on %q: %v", c[0], c[1], err)
+		}
+	}
+}
+
+// decisions.md "Origin check": an Origin that is present decides, and
+// `null` fails. A null or empty Origin is not treated as missing, so a
+// matching Referer can't rescue it.
+func TestRule5_PresentButFailingOriginIsNotRescuedByReferer(t *testing.T) {
+	for _, o := range []string{"null", ""} {
+		if err := middleware.CheckOrigin(post([]string{o}, []string{"http://localhost:8080/groups/x"}), host); err == nil {
+			t.Errorf("Origin %q allowed because the Referer matched", o)
+		}
+	}
+}
+
+// When Referer decides, every Referer value must name this host; a second,
+// foreign value is refused, not ignored.
+func TestRule5_RepeatedRefererWithForeignValueIsRefused(t *testing.T) {
+	if err := middleware.CheckOrigin(post(nil, []string{"http://localhost:8080/", "https://evil.test/"}), host); err == nil {
+		t.Fatal("matching Referer followed by a foreign one allowed")
+	}
+}
+
 // P0-SECURITY-02 / decisions.md: the refusal is a 403 with the same plain,
 // unbranded body everywhere.
 func TestRule5_RefusalIsPlainForbidden(t *testing.T) {
