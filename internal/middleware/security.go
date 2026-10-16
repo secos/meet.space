@@ -1,6 +1,7 @@
 // Package middleware holds the request checks every route goes through:
-// the Origin check (Security Rule 5), client IP extraction (Rule 8) and
-// the cache and referrer headers (Rule 7, route categories).
+// the Origin check (Security Rule 5), client IP extraction (Rule 8), the
+// cache and referrer headers (Rule 7, route categories) and the security
+// headers sent on every response.
 package middleware
 
 import (
@@ -12,6 +13,23 @@ import (
 	"net/url"
 	"strings"
 )
+
+// Security headers sent on every response (decisions.md "Security
+// headers"): browsers must not guess a file's type, and no site may show
+// our pages in a frame.
+const (
+	NoSniffValue        = "nosniff"
+	FrameAncestorsValue = "frame-ancestors 'none'"
+	FrameOptionsValue   = "DENY"
+)
+
+// SetSecurityHeaders writes the headers above into h, replacing whatever
+// a handler put there.
+func SetSecurityHeaders(h http.Header) {
+	h.Set("X-Content-Type-Options", NoSniffValue)
+	h.Set("Content-Security-Policy", FrameAncestorsValue)
+	h.Set("X-Frame-Options", FrameOptionsValue)
+}
 
 // ErrOriginMismatch is returned when a state-changing request did not come
 // from the site it was sent to.

@@ -412,6 +412,48 @@ func TestRule5_RouterLogsRefusalDetails(t *testing.T) {
 	}
 }
 
+// decisions.md "Security headers": every response the router sends carries
+// nosniff and the framing ban, including 404s on every host kind, the
+// origin-check refusal and a recovered panic.
+func TestSecurityHeaders_OnEveryRouterResponse(t *testing.T) {
+	h := build(t, table())
+	cases := []struct {
+		method, host, path string
+		status             int
+		mod                []func(*http.Request)
+	}{
+		{"GET", public, "/", 200, nil},
+		{"GET", hikers, "/", 200, nil},
+		{"GET", public, "/static/css/output.css", 200, nil},
+		{"GET", origin, "/health", 200, nil},
+		{"GET", public, "/rsvp/cancel/abc", 200, nil},
+		{"POST", public, "/groups/x/join", 200, nil},
+		{"GET", public, "/missing", 404, nil},
+		{"GET", hikers, "/directory", 404, nil},
+		{"GET", origin, "/", 404, nil},
+		{"GET", unknown, "/", 404, nil},
+		{"POST", hikers, "/", 404, nil},
+		{"POST", public, "/groups/x/join", 403, []func(*http.Request){func(r *http.Request) { r.Header.Set("Origin", "https://evil.test") }}},
+		{"GET", public, "/boom", 500, nil},
+		{"GET", unknown, "/boom", 404, nil},
+	}
+	for _, c := range cases {
+		res := h.do(c.method, c.host, c.path, c.mod...)
+		if res.StatusCode != c.status {
+			t.Errorf("%s %s%s: status %d, want %d", c.method, c.host, c.path, res.StatusCode, c.status)
+		}
+		for k, v := range map[string]string{
+			"X-Content-Type-Options":  "nosniff",
+			"Content-Security-Policy": "frame-ancestors 'none'",
+			"X-Frame-Options":         "DENY",
+		} {
+			if got := res.Header.Values(k); len(got) != 1 || got[0] != v {
+				t.Errorf("%s %s%s: %s %q, want %q", c.method, c.host, c.path, k, got, v)
+			}
+		}
+	}
+}
+
 // P0-CACHE-01, -02, -06: the declared policy is applied; everything else,
 // including 404s, panics and refusals, is no-store.
 func TestRule7_RouterAppliesDeclaredCachePolicy(t *testing.T) {

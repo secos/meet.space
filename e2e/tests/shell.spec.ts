@@ -89,3 +89,14 @@ test('works with JavaScript off', async ({ browser, baseURL }, info) => {
   await expect(page.getByRole('contentinfo')).toContainText(siteName(info));
   await ctx.close();
 });
+
+// decisions.md "Security headers": the browser refuses to show our pages
+// inside another page's frame (clickjacking).
+test('pages refuse to be shown in a frame', async ({ page, baseURL }, info) => {
+  await page.setContent(`<iframe id="f" src="${baseURL}/" width="600" height="400"></iframe>`);
+  const frame = await (await page.waitForSelector('#f')).contentFrame();
+  await frame!.waitForLoadState('load');
+  expect(frame!.url()).not.toBe(`${baseURL}/`);
+  await expect(frame!.getByRole('heading', { level: 1 })).toHaveCount(0);
+  await expect(frame!.getByText(siteName(info))).toHaveCount(0);
+});

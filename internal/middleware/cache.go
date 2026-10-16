@@ -49,8 +49,9 @@ func (p CachePolicy) Value() string {
 // Origin).
 const TokenPageReferrerPolicy = "same-origin"
 
-// PolicyWriter sets Cache-Control (and Referrer-Policy on token pages) just
-// before the status line goes out, so a handler can't change them. Any
+// PolicyWriter sets Cache-Control, the security headers, and
+// Referrer-Policy on token pages just before the status line goes out, so
+// a handler can't change them. Any
 // response with a status of 400 or more is sent no-store whatever the
 // route declared. So is a cacheable response that sets a cookie, which
 // would otherwise hand one visitor's cookie to everyone the CDN serves it
@@ -91,6 +92,7 @@ func (pw *PolicyWriter) WriteHeader(status int) {
 		policy = NoStore
 	}
 	h.Set("Cache-Control", policy.Value())
+	SetSecurityHeaders(h)
 	if pw.TokenPage {
 		h.Set("Referrer-Policy", TokenPageReferrerPolicy)
 	}

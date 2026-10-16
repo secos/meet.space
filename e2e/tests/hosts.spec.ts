@@ -33,6 +33,22 @@ test.describe('hosts', () => {
     }
   });
 
+  // decisions.md "Security headers": on every host kind and status.
+  test('every response carries the security headers', async ({ request }) => {
+    const cases: [string, string][] = [
+      [hosts.platform, '/'], [hosts.platform, '/static/js/htmx.min.js'], [hosts.platform, '/no-such-page'],
+      [hosts.group, '/'], [hosts.group, '/no-such-page'],
+      [hosts.origin, '/health'], [hosts.origin, '/'],
+      [`unknown.localhost:${port}`, '/'],
+    ];
+    for (const [host, path] of cases) {
+      const h = (await get(request, host, path)).headers();
+      expect(h['x-content-type-options'], host + path).toBe('nosniff');
+      expect(h['content-security-policy'], host + path).toBe("frame-ancestors 'none'");
+      expect(h['x-frame-options'], host + path).toBe('DENY');
+    }
+  });
+
   test('unknown host gets the bare 404', async ({ request }) => {
     const res = await get(request, `unknown.localhost:${port}`, '/');
     expect(res.status()).toBe(404);

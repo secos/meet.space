@@ -1,6 +1,7 @@
 package middleware_test
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -120,4 +121,40 @@ func TestRule7_NoStoreResponseMaySetCookieQuietly(t *testing.T) {
 	if logs.Len() != 0 {
 		t.Errorf("logged %q", logs.String())
 	}
+}
+
+// decisions.md "Security headers": nosniff and the framing ban go out on
+// every response, whatever the status, policy or page kind, and a handler
+// can't change them.
+func TestSecurityHeaders_SetOnEveryResponse(t *testing.T) {
+	want := map[string]string{
+		"X-Content-Type-Options":  "nosniff",
+		"Content-Security-Policy": "frame-ancestors 'none'",
+		"X-Frame-Options":         "DENY",
+	}
+	check := func(name string, h http.Header) {
+		t.Helper()
+		for k, v := range want {
+			if got := h.Values(k); len(got) != 1 || got[0] != v {
+				t.Errorf("%s: %s %q, want %q", name, k, got, v)
+			}
+		}
+	}
+	policies := []middleware.CachePolicy{middleware.NoStore, middleware.PublicPage, middleware.Immutable, middleware.CacheUndeclared}
+	for _, p := range policies {
+		for _, status := range []int{200, 204, 302, 304, 403, 404, 500} {
+			for _, token := range []bool{false, true} {
+				rec := httptest.NewRecorder()
+				pw := middleware.NewPolicyWriter(rec, p, token)
+				pw.Header().Set("X-Frame-Options", "ALLOWALL")
+				pw.Header().Add("Content-Security-Policy", "frame-ancestors *")
+				pw.Header().Set("X-Content-Type-Options", "")
+				pw.WriteHeader(status)
+				check(fmt.Sprintf("policy %d status %d token %v", p, status, token), rec.Header())
+			}
+		}
+	}
+	rec := httptest.NewRecorder()
+	_, _ = middleware.NewPolicyWriter(rec, middleware.PublicPage, false).Write([]byte("ok"))
+	check("implicit 200", rec.Header())
 }
