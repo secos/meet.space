@@ -18,6 +18,12 @@ A short record of what has been decided, why, and what is still open. Update it 
 | Visual design | Clean is the default look for every group and the platform. Any group, free or paid, can choose Lively, Confetti or Poster. Brand color and logo stay paid. Noticeboard and Program were dropped. | Clean was the preferred direction. The others give every organizer a distinct, colorful identity. The look is its own column, so it survives a lapse; color and logo reset. | Design treatments page (published artifact) |
 | Not in v1 | SMS, web push, recurring meetings, cross-domain single sign-on, per-group sending domains | Cost and compliance for SMS; scope for the rest. | `sms.md`, `prd.md` §9 |
 
+## Working decisions (2026-10-15, not finalized)
+
+| Area | Decision | Why | Notes |
+|---|---|---|---|
+| HTMX version | htmx 4.0.0, vendored as `static/js/htmx.min.js` | Owner preference. Pages no longer go into a `localStorage` history cache (htmx 4 reloads the full page on back), so private fragments are never written to storage. | npm still tags 2.x as `latest`; 4.0.0 is the GitHub "latest" release. The plan's htmx patterns are written for htmx 2. In htmx 4: attribute inheritance must be explicit (`hx-target:inherited`); 4xx/5xx responses swap by default (use 422 for inline form errors, `hx-status:` per element); `hx-delete` no longer sends the enclosing form's inputs; event names are colon-separated (`htmx:after:swap`). `HX-Trigger` responses and `hx-trigger="load, rsvp-changed from:body"` work unchanged. |
+
 **Consequences of the choices above**
 - No high availability. An instance failure means restoring from the latest backup; the worst case is losing up to a day of data until WAL archiving is added.
 - AWS bills for the public IPv4 address ($3.65/month) whether or not it is in use.
