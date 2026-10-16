@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/netip"
 	"net/url"
-	"os"
 	"strings"
 
 	"github.com/caarlos0/env/v11"
@@ -75,11 +74,11 @@ type Config struct {
 // MinSecretLen is the shortest APP_SECRET accepted, in bytes.
 const MinSecretLen = 32
 
-// FromEnviron reads the process environment. Only cmd/server calls it;
-// tests build a Config with Parse so a developer's real keys never reach
-// a test server.
-func FromEnviron() (Config, error) {
-	return Parse(env.ToMap(os.Environ()))
+// FromEnviron reads an environment in os.Environ form. Only cmd/server
+// passes the real process environment; tests build their own, so a
+// developer's real keys never reach a test server.
+func FromEnviron(environ []string) (Config, error) {
+	return Parse(env.ToMap(environ))
 }
 
 // Parse builds a Config from the given variables and validates it.

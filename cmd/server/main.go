@@ -31,14 +31,16 @@ import (
 )
 
 func main() {
-	if err := run(context.Background(), os.Args[1:], os.Stdout, os.Stderr); err != nil {
+	if err := run(context.Background(), os.Args[1:], os.Environ(), os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "server:", err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	cfg, err := config.FromEnviron()
+// run is the whole program; environ is the environment to read config
+// from, so tests can pass their own.
+func run(ctx context.Context, args, environ []string, stdout, stderr io.Writer) error {
+	cfg, err := config.FromEnviron(environ)
 	if err != nil {
 		return fmt.Errorf("config:\n%w", err)
 	}

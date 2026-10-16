@@ -287,3 +287,14 @@ func redact(u string) string {
 	}
 	return p.Redacted()
 }
+
+// Open connects to url for the rest of the test.
+func Open(t testing.TB, url string) *pgxpool.Pool {
+	t.Helper()
+	pool, err := database.Open(context.Background(), url)
+	if err != nil {
+		t.Fatalf("open %s: %v", redact(url), err)
+	}
+	t.Cleanup(pool.Close)
+	return pool
+}

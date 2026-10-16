@@ -11,7 +11,9 @@ function get(request: APIRequestContext, host: string, path: string) {
 // and "Error pages"), checked over real HTTP. Host-level, so it runs once.
 
 test.describe('hosts', () => {
-  test.skip(({}, info) => info.project.name !== 'platform', 'host checks run once');
+  test.beforeEach(({}, info) => {
+    test.skip(info.project.name !== 'platform', 'host checks run once');
+  });
 
   test('origin host serves only /health', async ({ request }) => {
     const health = await get(request, hosts.origin, '/health');
