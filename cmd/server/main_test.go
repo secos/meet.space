@@ -5,10 +5,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 
 	"meet.space/internal/clock/clocktest"
 	"meet.space/internal/email"
@@ -236,6 +241,74 @@ func TestServe_StartsOnANewerSchemaWithAWarning(t *testing.T) {
 	cancel()
 	if err := <-done; err != nil {
 		t.Errorf("serve returned %v", err)
+	}
+}
+
+// decisions.md "Custom-domain list": serve reloads the list on its own, so
+// a domain activated directly in the database starts serving its group
+// without a restart.
+func TestServe_ReloadsCustomDomains(t *testing.T) {
+	defer func(old time.Duration) { domainReloadInterval = old }(domainReloadInterval)
+	domainReloadInterval = 20 * time.Millisecond
+	db := testkit.NewDB(t)
+	const host = "reload.example.test"
+	id := uuid.Must(uuid.NewV7())
+	if _, err := db.Pool.Exec(context.Background(), `INSERT INTO groups (id, slug, name, timezone, custom_domain, custom_domain_status)
+		VALUES ($1, 'reload', 'Reload Hikers', 'America/Chicago', $2, 'pending_dns')`, id, host); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	out := &syncBuffer{}
+	done := make(chan error, 1)
+	go func() {
+		done <- run(ctx, nil, environ(db.URL, "LISTEN_ADDR=127.0.0.1:0", "STATIC_DIR=../../static", "TEMPLATE_DIR=../../templates"), out, out)
+	}()
+	listening := regexp.MustCompile(`msg=listening addr=(\S+)`)
+	var addr string
+	for deadline := time.Now().Add(10 * time.Second); addr == "" && time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if m := listening.FindStringSubmatch(out.String()); m != nil {
+			addr = m[1]
+		}
+	}
+	if addr == "" {
+		t.Fatalf("serve never logged its address:\n%s", out.String())
+	}
+	get := func() (int, string) {
+		req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/", nil)
+		req.Host = host
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		b, _ := io.ReadAll(res.Body)
+		return res.StatusCode, string(b)
+	}
+	if status, _ := get(); status != http.StatusNotFound {
+		t.Fatalf("pending domain answered %d", status)
+	}
+	if _, err := db.Pool.Exec(context.Background(), `UPDATE groups SET custom_domain_status = 'active' WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	var status int
+	var body string
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if status, body = get(); status == http.StatusOK {
+			break
+		}
+	}
+	if status != http.StatusOK || !strings.Contains(body, "Reload Hikers") {
+		t.Errorf("activated domain after reloads: %d\n%s", status, body)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("serve returned %v", err)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("serve did not stop")
 	}
 }
 

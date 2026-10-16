@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -60,6 +61,10 @@ func run(ctx context.Context, args, environ []string, stdout, stderr io.Writer) 
 	return errors.New("unknown command")
 }
 
+// domainReloadInterval is how often serve reloads the custom-domain list;
+// tests shorten it.
+var domainReloadInterval = site.ReloadInterval
+
 func newLogger(cfg config.Config, w io.Writer) *slog.Logger {
 	if cfg.Env == config.EnvProduction {
 		return slog.New(slog.NewJSONHandler(w, nil))
@@ -88,13 +93,25 @@ func serve(ctx context.Context, cfg config.Config, stdout io.Writer) error {
 		logger.Warn("database schema is newer than this build", "database", have, "build", want)
 	}
 
-	// OPEN(Q19): what to do when the domain map can't be loaded or
-	// refreshed is an open owner question. For now a failed initial load
-	// stops the server rather than serving custom domains as unknown hosts.
+	// The first load is strict: the server never starts serving custom
+	// domains as unknown hosts. After that the list is reloaded every
+	// minute, keeping the last good one if a reload fails (decisions.md
+	// "Custom-domain list").
 	domains := site.NewDomains(cfg.PublicHost, cfg.OriginHost)
 	if err := domains.Load(ctx, pool); err != nil {
 		return fmt.Errorf("load custom domains: %w", err)
 	}
+	reloadCtx, stopReload := context.WithCancel(ctx)
+	reloadDone := make(chan struct{})
+	go func() {
+		defer close(reloadDone)
+		domains.Reload(reloadCtx, pool, domainReloadInterval, logger)
+	}()
+	// Runs before pool.Close.
+	defer func() {
+		stopReload()
+		<-reloadDone
+	}()
 
 	dev := cfg.Env == config.EnvDevelopment
 	assetSet, err := assets.New(cfg.StaticDir, dev)
@@ -145,14 +162,18 @@ func serve(ctx context.Context, cfg config.Config, stdout io.Writer) error {
 	}()
 
 	srv := &http.Server{
-		Addr:              cfg.ListenAddr,
 		Handler:           a.Handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
 	}
+	ln, err := net.Listen("tcp", cfg.ListenAddr)
+	if err != nil {
+		return err
+	}
 	errc := make(chan error, 1)
-	go func() { errc <- srv.ListenAndServe() }()
-	logger.Info("listening", "addr", cfg.ListenAddr, "public_host", cfg.PublicHost, "env", cfg.Env)
+	go func() { errc <- srv.Serve(ln) }()
+	// The bound address, so ":0" in tests shows the real port.
+	logger.Info("listening", "addr", ln.Addr().String(), "public_host", cfg.PublicHost, "env", cfg.Env)
 
 	select {
 	case err := <-errc:

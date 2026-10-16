@@ -7,9 +7,11 @@ package site
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -67,9 +69,10 @@ func FromContext(ctx context.Context) Context {
 	return c
 }
 
-// Domains is the in-memory map of active custom domains, loaded at startup
-// and refreshed whenever a domain changes state. Lookups never query the
-// database, and a refresh swaps the whole map at once.
+// Domains is the in-memory map of active custom domains, loaded at startup,
+// refreshed whenever a domain changes state, and reloaded every
+// ReloadInterval as a backstop (decisions.md "Custom-domain list"). Lookups
+// never query the database, and a refresh swaps the whole map at once.
 type Domains struct {
 	m atomic.Pointer[domainMaps]
 	// reserved hosts (the platform and origin hosts) never enter the map,
@@ -126,6 +129,29 @@ func (d *Domains) Load(ctx context.Context, q Querier) error {
 	}
 	d.m.Store(next)
 	return nil
+}
+
+// ReloadInterval is how often the server rereads the whole map, so a
+// refresh that failed, or a change made outside the running server, shows
+// up within a minute (decisions.md "Custom-domain list").
+const ReloadInterval = time.Minute
+
+// Reload calls Load every interval until ctx is done. A failed load is
+// logged and the last good map stays in place, so a database hiccup never
+// turns custom domains into unknown hosts.
+func (d *Domains) Reload(ctx context.Context, q Querier, every time.Duration, logger *slog.Logger) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if err := d.Load(ctx, q); err != nil && ctx.Err() == nil {
+				logger.Error("site: reloading custom domains failed; keeping the last good list", "err", err)
+			}
+		}
+	}
 }
 
 // Set replaces the map with hosts (host → group). Hosts are lowercased.

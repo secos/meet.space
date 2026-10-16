@@ -2,12 +2,18 @@ package site_test
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"meet.space/internal/site"
 	"meet.space/internal/testkit"
@@ -418,5 +424,175 @@ func TestRule2_PlatformCurrentBaseURLComesFromConfigNotRequestHost(t *testing.T)
 	got, err := l.CurrentBaseURL(site.Context{Kind: site.KindPlatform, Host: "evil.test"})
 	if err == nil && got != "https://meet.example" {
 		t.Errorf("platform context naming another host: %q, want PUBLIC_BASE_URL or an error", got)
+	}
+}
+
+// waitFor polls cond until it holds or two seconds pass.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+		if cond() {
+			return
+		}
+	}
+	t.Fatalf("after 2s: %s", what)
+}
+
+// lockedBuffer is a log sink a goroutine can write while the test reads.
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
+
+// failingQuerier fails every query, as a database outage would.
+type failingQuerier struct{ calls atomic.Int32 }
+
+func (q *failingQuerier) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	q.calls.Add(1)
+	return nil, errors.New("connection reset")
+}
+
+// partialQuerier returns one row, then fails: a connection lost mid-read.
+type partialQuerier struct {
+	host string
+	id   uuid.UUID
+}
+
+func (q partialQuerier) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	return &partialRows{host: q.host, id: q.id}, nil
+}
+
+// partialRows implements only what Load calls; the embedded nil pgx.Rows
+// supplies the rest of the interface.
+type partialRows struct {
+	pgx.Rows
+	host string
+	id   uuid.UUID
+	read bool
+}
+
+func (r *partialRows) Next() bool {
+	if r.read {
+		return false
+	}
+	r.read = true
+	return true
+}
+
+func (r *partialRows) Scan(dest ...any) error {
+	*dest[0].(*string), *dest[1].(*uuid.UUID) = r.host, r.id
+	return nil
+}
+
+func (r *partialRows) Err() error {
+	if r.read {
+		return errors.New("connection lost mid-read")
+	}
+	return nil
+}
+
+func (r *partialRows) Close() {}
+
+// decisions.md "Custom-domain list": the periodic reload picks up changes
+// made outside the running server, both a domain activated and one
+// removed, with no refresh call.
+func TestDomains_ReloadPicksUpChangesMadeElsewhere(t *testing.T) {
+	db := testkit.NewDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	removed := insertGroup(t, db, "hikers", hikers, "active")
+	activated := insertGroup(t, db, "pending", pending, "pending_dns")
+	d := site.NewDomains(public, origin)
+	if err := d.Load(ctx, db.Pool); err != nil {
+		t.Fatal(err)
+	}
+	go d.Reload(ctx, db.Pool, 10*time.Millisecond, slog.New(slog.DiscardHandler))
+
+	if _, err := db.Pool.Exec(ctx, `UPDATE groups SET custom_domain_status = 'active' WHERE id = $1`, activated); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx, `UPDATE groups SET custom_domain = NULL, custom_domain_status = NULL WHERE id = $1`, removed); err != nil {
+		t.Fatal(err)
+	}
+	r := resolver(d, "host")
+	waitFor(t, "the activated domain resolves and the removed one doesn't", func() bool {
+		return r.Resolve(req(pending)).GroupID == activated && r.Resolve(req(hikers)).Kind == site.KindNone
+	})
+}
+
+// decisions.md "Custom-domain list": a reload that fails, whether the
+// query fails outright or the read breaks partway, keeps the last good
+// list and logs an error.
+func TestDomains_FailedReloadKeepsTheLastGoodList(t *testing.T) {
+	d := site.NewDomains(public, origin)
+	id := uuid.Must(uuid.NewV7())
+	d.Set(map[string]uuid.UUID{hikers: id})
+	r := resolver(d, "host")
+
+	var logs lockedBuffer
+	q := &failingQuerier{}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		d.Reload(ctx, q, 5*time.Millisecond, slog.New(slog.NewTextHandler(&logs, nil)))
+	}()
+	waitFor(t, "three failed reloads", func() bool { return q.calls.Load() >= 3 })
+	cancel()
+	<-done
+	if got := r.Resolve(req(hikers)); got.Kind != site.KindGroup || got.GroupID != id {
+		t.Errorf("after failed reloads: %+v", got)
+	}
+	for _, want := range []string{"level=ERROR", "reloading custom domains failed; keeping the last good list", "connection reset"} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("log lacks %q:\n%s", want, logs.String())
+		}
+	}
+
+	if err := d.Load(context.Background(), partialQuerier{host: pending, id: uuid.Must(uuid.NewV7())}); err == nil {
+		t.Error("a read that broke partway reported success")
+	}
+	if got := r.Resolve(req(pending)); got.Kind != site.KindNone {
+		t.Errorf("a host from a broken read was stored: %+v", got)
+	}
+	if got := r.Resolve(req(hikers)); got.GroupID != id {
+		t.Errorf("a broken read replaced the last good list: %+v", got)
+	}
+}
+
+// decisions.md "Custom-domain list": the reload stops with its context,
+// so the server can close the pool after it on shutdown.
+func TestDomains_ReloadStopsWithItsContext(t *testing.T) {
+	q := &failingQuerier{}
+	var logs lockedBuffer
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		site.NewDomains(public, origin).Reload(ctx, q, 5*time.Millisecond, slog.New(slog.NewTextHandler(&logs, nil)))
+	}()
+	waitFor(t, "a first reload", func() bool { return q.calls.Load() >= 1 })
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Reload kept running after its context ended")
+	}
+	n := q.calls.Load()
+	time.Sleep(50 * time.Millisecond)
+	if got := q.calls.Load(); got != n {
+		t.Errorf("%d more reloads after Reload returned", got-n)
 	}
 }
