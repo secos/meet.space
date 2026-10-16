@@ -9,13 +9,14 @@ import (
 	"meet.space/internal/testkit/apptest"
 )
 
-// Security Rule 7, with development-plan.md route categories 1-2 and Phase
-// 3 ("the RSVP fragment can show \"You're going\"") and Phase 8 ("The
-// server never reads location from cookies, so pages stay cacheable"): a
-// cacheable page is the same whatever cookies the request carries; only
-// no-store fragments are personalized. TestRule7_CacheablePagesCarryNoPrivateData
-// varies only the session cookie; this sends the other kinds a browser may
-// hold. When Phase 3 names the anonymous RSVP cookie, use its real name here.
+// Security Rule 7, with development-plan.md route categories 1-2, Phase 2
+// (the anonymous RSVP cookie is read by "the RSVP fragment") and Phase 8
+// ("The server never reads location from cookies, so pages stay
+// cacheable"): a cacheable page is the same whatever cookies the request
+// carries; only no-store fragments are personalized.
+// TestRule7_CacheablePagesCarryNoPrivateData varies only the session
+// cookie; this sends the other kinds a browser may hold. When Phase 2 names
+// the anonymous RSVP cookie, use its real name here.
 func TestRule7_CacheablePagesIgnoreRequestCookies(t *testing.T) {
 	a := apptest.NewApp(t)
 	a.Seed()
