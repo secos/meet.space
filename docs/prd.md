@@ -221,7 +221,7 @@ All primary keys are UUIDv7, generated in Go (time-ordered, so IDs sort by creat
 - **sessions**: user, hostname the session belongs to, token hash, expiry
 - **magic_links**: email, hostname, token hash, purpose (log in / join group / accept co-organizer invite), purpose details, return path, expiry, used time
 - **groups**: slug, name, description, topic, location text and coordinates, timezone, cover image, member-posting setting, reminder audience setting, tier, member limit (none when paid), storage limit, look, custom domain and its status, branding (color, logo), suspended time
-- **memberships**: user, group, role (owner / co_organizer / member), joined time; exactly one owner per group, enforced by the database
+- **memberships**: user, group, role (owner / co_organizer / member), joined time; exactly one owner per group: the database refuses a second owner, and the server keeps at least one (decisions.md "One owner per group")
 - **meetings**: group, title, description, start time, timezone, duration, type, address with Place ID and coordinates, private virtual link, canceled flag, reminder-sent time
 - **rsvps**: meeting, email, optional name, linked user (once verified), attended flag
 - **posts**: group, meeting (for meeting comments), parent post (for replies to feed posts), author, content

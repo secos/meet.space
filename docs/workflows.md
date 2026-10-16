@@ -493,7 +493,7 @@ App → Browser: 302 group admin
 
 -- Transfer --
 Browser → App: POST /admin/groups/{slug}/transfer-ownership (target user_id)   (owner)
-App → DB (one transaction): owner → co_organizer; target → owner   (the one-owner index guarantees exactly one owner)
+App → DB (one transaction): owner → co_organizer; target → owner   (demote first: the one-owner index refuses a second owner, and the single transaction means there is never none)
   [paid] App → Stripe: set cancel_at_period_end = true (new owner's Checkout later uses trial_end = old period end)
 App → Mail (queued): new owner notice (+ subscribe link if paid)
 App → Browser: 302 members page (now shown with co-organizer permissions)

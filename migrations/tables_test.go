@@ -348,9 +348,10 @@ func TestMemberships_RoleUniqueAndOnConflict(t *testing.T) {
 // P0-SCHEMA-22
 // A group has at most one owner: a second owner is refused whether it is
 // inserted or promoted by UPDATE, while other groups keep their own owners
-// and a group has any number of co-organizers and members.
-// OPEN (G-19): whether the database must also guarantee at least one
-// owner is not decided; it is not tested.
+// and a group has any number of co-organizers and members. At least one
+// owner is the server's job, not the database's (decisions.md "One owner
+// per group"); it is tested where groups are created, transferred, left
+// and deleted.
 func TestMemberships_AtMostOneOwnerPerGroup(t *testing.T) {
 	t.Parallel()
 	f := newFx(t)
