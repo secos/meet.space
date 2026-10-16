@@ -2,10 +2,10 @@ package app_test
 
 import (
 	"net/http"
-	"strings"
 	"testing"
 
 	"meet.space/internal/middleware"
+	"meet.space/internal/site"
 	"meet.space/internal/testkit/apptest"
 )
 
@@ -29,8 +29,11 @@ func TestRule7_CacheablePagesIgnoreRequestCookies(t *testing.T) {
 		if rt.Cache != middleware.PublicPage {
 			continue
 		}
-		path := strings.TrimSuffix(rt.Pattern, "{$}")
-		for _, host := range siteHosts {
+		path := samplePath(rt.Pattern)
+		for host, kind := range map[string]site.Kind{apptest.PlatformHost: site.KindPlatform, apptest.GroupHost: site.KindGroup} {
+			if !rt.Hosts.Has(kind) {
+				continue
+			}
 			plain := a.Client().Get(host, path)
 			if plain.StatusCode != http.StatusOK {
 				t.Fatalf("%s%s: status %d", host, path, plain.StatusCode)
