@@ -444,6 +444,45 @@ func TestRule7_RouterAppliesDeclaredCachePolicy(t *testing.T) {
 	}
 }
 
+// Security Rule 7 (cache.go: "everything not opted in gets NoStore"): a
+// request that matches no route on its host is no-store because the router
+// never opted it in, not only because its status happens to be 4xx. The
+// not-found handler here answers 200 or 302, so the status override can't
+// hide a router that defaults to, or leaks, a cacheable policy.
+func TestRule7_UnmatchedRequestsAreNoStoreWhateverTheStatus(t *testing.T) {
+	d := site.NewDomains(public, origin)
+	d.Set(map[string]uuid.UUID{hikers: uuid.Must(uuid.NewV7())})
+	for _, status := range []int{http.StatusOK, http.StatusFound} {
+		r, err := route.Build(route.Config{
+			Resolver: &site.Resolver{PublicHost: public, OriginHost: origin, HostSource: "host", Domains: d},
+			ClientIP: func(r *http.Request) netip.Addr { return middleware.ClientIP(r, nil, "X-Forwarded-For") },
+			NotFound: func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Location", "/")
+				w.WriteHeader(status)
+			},
+			ServerError: func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusInternalServerError) },
+			Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		}, table())
+		if err != nil {
+			t.Fatalf("build: %v", err)
+		}
+		h := &harness{router: r}
+		for _, c := range []struct{ method, host, path string }{
+			{"GET", public, "/missing"},   // no such route
+			{"GET", hikers, "/directory"}, // a cacheable route not served on this host
+			{"POST", public, "/"},         // a cacheable path, wrong method
+		} {
+			res := h.do(c.method, c.host, c.path)
+			if res.StatusCode != status {
+				t.Fatalf("%s %s%s: status %d, want the stub's %d", c.method, c.host, c.path, res.StatusCode, status)
+			}
+			if got := res.Header.Get("Cache-Control"); got != "no-store, private" {
+				t.Errorf("%s %s%s (status %d): Cache-Control %q, want no-store, private", c.method, c.host, c.path, status, got)
+			}
+		}
+	}
+}
+
 // The site-aware 404 serves the platform and custom domains.
 func TestRouter_SiteAware404OnPlatformAndCustomDomain(t *testing.T) {
 	h := build(t, table())
