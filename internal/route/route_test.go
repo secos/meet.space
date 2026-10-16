@@ -532,3 +532,28 @@ func TestRule11_WebhooksDeclaredOnlyOnOriginHost(t *testing.T) {
 		}
 	}
 }
+
+// Rule 7: a handler that panics after a cacheable page has started must
+// not leave a truncated page the CDN could keep; the connection is aborted.
+func TestRule7_PanicAfterWritingAbortsTheResponse(t *testing.T) {
+	routes := []route.Route{{Method: "GET", Pattern: "/{$}", Hosts: route.OnPlatform, Role: route.Anyone, Cache: middleware.PublicPage,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprint(w, "<html>partial")
+			w.(http.Flusher).Flush()
+			panic("boom after writing")
+		})}}
+	h := build(t, routes)
+	srv := httptest.NewServer(h.router)
+	srv.Config.ErrorLog = slog.NewLogLogger(slog.NewTextHandler(io.Discard, nil), slog.LevelError)
+	defer srv.Close()
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/", nil)
+	req.Host = public
+	res, err := srv.Client().Do(req)
+	if err != nil {
+		return // aborted before the headers: fine
+	}
+	defer res.Body.Close()
+	if _, err := io.ReadAll(res.Body); err == nil {
+		t.Fatalf("truncated page delivered as complete (status %d, Cache-Control %q)", res.StatusCode, res.Header.Get("Cache-Control"))
+	}
+}

@@ -262,8 +262,11 @@ func TestRule7_CacheablePagesCarryNoPrivateData(t *testing.T) {
 		if rt.Cache != middleware.PublicPage {
 			continue
 		}
-		path := strings.TrimSuffix(rt.Pattern, "{$}")
+		path := samplePath(rt.Pattern)
 		for _, host := range siteHosts {
+			if k := map[string]site.Kind{apptest.PlatformHost: site.KindPlatform, apptest.GroupHost: site.KindGroup}[host]; !rt.Hosts.Has(k) {
+				continue
+			}
 			var first string
 			for _, role := range apptest.Roles {
 				c := a.Client().As(a, f, role, host)
@@ -302,11 +305,24 @@ func TestRoleHostMatrix(t *testing.T) {
 		apptest.PlatformHost: site.KindPlatform, apptest.GroupHost: site.KindGroup,
 		apptest.OriginHost: site.KindOrigin, apptest.UnknownHost: site.KindNone,
 	}
+	// The hosts each route is documented to be served on, written out by
+	// hand so the matrix doesn't take its expectations from the table it
+	// checks (development-plan.md "Site Context"; decisions.md "/health").
+	documented := map[string][]site.Kind{
+		"GET /{$}":              {site.KindPlatform, site.KindGroup},
+		"GET /static/{path...}": {site.KindPlatform, site.KindGroup},
+		"GET /health":           {site.KindOrigin},
+	}
 	for _, rt := range a.App.Router.Routes() {
 		path := samplePath(rt.Pattern)
+		served, ok := documented[rt.Key()]
+		if !ok {
+			t.Errorf("%s: add its documented hosts to this matrix", rt.Key())
+			continue
+		}
 		for host, kind := range hostKinds {
 			want := 404
-			if rt.Hosts.Has(kind) {
+			if slices.Contains(served, kind) {
 				want = 200
 			}
 			for _, role := range apptest.Roles {

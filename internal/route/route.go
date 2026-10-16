@@ -324,7 +324,9 @@ func (r *Router) recoverPanic(pw *middleware.PolicyWriter, req *http.Request) {
 	}
 	r.cfg.Logger.Error("panic serving request", "path", req.URL.Path, "panic", v, "stack", string(debug.Stack()))
 	if pw.Status() != 0 {
-		return // too late to change the response
+		// Too late to send an error page. Abort the connection so the client
+		// and the CDN see a broken response, never a cacheable truncated page.
+		panic(http.ErrAbortHandler)
 	}
 	pw.Policy = middleware.NoStore
 	if k := site.FromContext(req.Context()).Kind; k == site.KindNone || k == site.KindOrigin {

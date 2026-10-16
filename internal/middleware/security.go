@@ -113,6 +113,9 @@ func parseForwardedAddr(s string) (netip.Addr, bool) {
 		return netip.Addr{}, false
 	}
 	if ap, err := netip.ParseAddrPort(s); err == nil {
+		if ap.Addr().Zone() != "" {
+			return netip.Addr{}, false
+		}
 		return ap.Addr().Unmap(), true
 	}
 	a, err := netip.ParseAddr(s)

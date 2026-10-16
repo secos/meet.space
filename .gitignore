@@ -21,3 +21,6 @@
 # teak pointer (not secret, kept out of git)
 .teak
 /e2e/screenshots/
+/server
+/.claude/worktrees/
+/.claude/settings.local.json

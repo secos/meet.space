@@ -405,3 +405,69 @@ func TestMakefileTargets(t *testing.T) {
 }
 
 var _ = testkit.ErrNetworkInTest
+
+// P0-SITE-12: the site context's host is the only visitor host code may
+// use. Outside internal/site, no function reads Host from an *http.Request
+// it receives (the Origin check, host binding and links all take
+// site.Context.Host). Variables are found by their declared type in the
+// function's parameters and local declarations.
+func TestOnlySiteReadsTheRequestHost(t *testing.T) {
+	for _, g := range goFiles(t) {
+		if g.test || under(g.rel, "internal/site", "internal/testkit") {
+			continue
+		}
+		httpName := importName(g.file, "net/http")
+		if httpName == "" {
+			continue
+		}
+		isRequest := func(e ast.Expr) bool {
+			star, ok := e.(*ast.StarExpr)
+			if !ok {
+				return false
+			}
+			sel, ok := star.X.(*ast.SelectorExpr)
+			if !ok {
+				return false
+			}
+			id, ok := sel.X.(*ast.Ident)
+			return ok && id.Name == httpName && sel.Sel.Name == "Request"
+		}
+		ast.Inspect(g.file, func(n ast.Node) bool {
+			var typ *ast.FuncType
+			var body *ast.BlockStmt
+			switch fn := n.(type) {
+			case *ast.FuncDecl:
+				typ, body = fn.Type, fn.Body
+			case *ast.FuncLit:
+				typ, body = fn.Type, fn.Body
+			default:
+				return true
+			}
+			if body == nil {
+				return true
+			}
+			reqs := map[string]bool{}
+			for _, f := range typ.Params.List {
+				if isRequest(f.Type) {
+					for _, nm := range f.Names {
+						reqs[nm.Name] = true
+					}
+				}
+			}
+			ast.Inspect(body, func(m ast.Node) bool {
+				if vs, ok := m.(*ast.ValueSpec); ok && vs.Type != nil && isRequest(vs.Type) {
+					for _, nm := range vs.Names {
+						reqs[nm.Name] = true
+					}
+				}
+				if sel, ok := m.(*ast.SelectorExpr); ok && sel.Sel.Name == "Host" {
+					if id, ok := sel.X.(*ast.Ident); ok && reqs[id.Name] {
+						t.Errorf("%s: reads %s.Host; use site.FromContext(ctx).Host", g.fset.Position(sel.Pos()), id.Name)
+					}
+				}
+				return true
+			})
+			return true
+		})
+	}
+}

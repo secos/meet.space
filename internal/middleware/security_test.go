@@ -226,7 +226,7 @@ func TestRule8_OnlyTheConfiguredHeaderIsRead(t *testing.T) {
 
 // A missing, empty or malformed header falls back to the peer.
 func TestRule8_MalformedHeaderFallsBackToPeer(t *testing.T) {
-	for _, xff := range [][]string{nil, {""}, {"garbage"}, {"198.51.100.7, nope"}, {"10.1.1.1, 10.2.2.2"}, {"fe80::1%eth0"}} {
+	for _, xff := range [][]string{nil, {""}, {"garbage"}, {"198.51.100.7, nope"}, {"10.1.1.1, 10.2.2.2"}, {"fe80::1%eth0"}, {"[fe80::1%eth0]:443"}} {
 		r := ipReq("10.0.0.2:9000", map[string][]string{"X-Forwarded-For": xff})
 		if got := middleware.ClientIP(r, caddy, "X-Forwarded-For"); got != netip.MustParseAddr("10.0.0.2") {
 			t.Errorf("XFF %q: got %s, want the peer", xff, got)
