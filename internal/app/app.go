@@ -43,6 +43,9 @@ type App struct {
 	Resolver *site.Resolver
 	Links    site.Links
 	Handlers *handler.Handlers
+	// ClientIP is the Security Rule 8 extractor the router puts on every
+	// request's context, built from TRUSTED_PROXIES and CLIENT_IP_HEADER.
+	ClientIP func(*http.Request) netip.Addr
 }
 
 // New builds the app.
@@ -76,9 +79,10 @@ func New(d Deps) (*App, error) {
 		Logger:       d.Logger,
 	}
 	ipHeader := d.Config.ClientIPHeader
+	clientIP := func(r *http.Request) netip.Addr { return middleware.ClientIP(r, trusted, ipHeader) }
 	router, err := route.Build(route.Config{
 		Resolver:    resolver,
-		ClientIP:    func(r *http.Request) netip.Addr { return middleware.ClientIP(r, trusted, ipHeader) },
+		ClientIP:    clientIP,
 		NotFound:    h.NotFound,
 		ServerError: h.ServerError,
 		Logger:      d.Logger,
@@ -86,5 +90,5 @@ func New(d Deps) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &App{Handler: router, Router: router, Resolver: resolver, Links: links, Handlers: h}, nil
+	return &App{Handler: router, Router: router, Resolver: resolver, Links: links, Handlers: h, ClientIP: clientIP}, nil
 }
