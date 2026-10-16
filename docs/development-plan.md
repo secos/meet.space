@@ -363,7 +363,9 @@ CREATE TABLE email_outbox (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     sent_at         TIMESTAMPTZ
 );
-CREATE INDEX idx_outbox_due ON email_outbox (stream, next_attempt_at) WHERE status IN ('pending', 'failed');
+-- 'sending' rows are included so a row whose sender crashed mid-send is found again once its
+-- 2-minute claim (next_attempt_at, set when the row is taken) runs out (decisions.md).
+CREATE INDEX idx_outbox_due ON email_outbox (stream, next_attempt_at) WHERE status IN ('pending', 'failed', 'sending');
 CREATE INDEX idx_outbox_message ON email_outbox (ses_message_id) WHERE ses_message_id IS NOT NULL;
 
 -- Addresses we must not send to again. Applies platform-wide.

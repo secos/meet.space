@@ -170,35 +170,8 @@ func TestUp_CatalogMatchesThePlansDDL(t *testing.T) {
 	migrated := dumpCatalog(t, connect(t, url), "schema_migrations")
 
 	onlyPlan, onlyMigration := diffLines(plan, migrated)
-	onlyPlan, onlyMigration = allowOutboxDueSending(t, onlyPlan, onlyMigration)
 	if len(onlyPlan)+len(onlyMigration) > 0 {
 		t.Errorf("migration 001 differs from development-plan.md\nonly in the plan:\n  %s\nonly in the migration:\n  %s",
 			strings.Join(onlyPlan, "\n  "), strings.Join(onlyMigration, "\n  "))
 	}
-}
-
-// OPEN: development-plan.md's DDL creates idx_outbox_due with
-// WHERE status IN ('pending', 'failed'); migration 001 adds 'sending', so a
-// row whose sender crashed mid-send can be found again once its lease
-// (next_attempt_at) runs out. The plan's Phase 6 step 10 implies such rows
-// are retried, but neither the plan's DDL nor decisions.md records the
-// change. Until the owner decides, this accepts exactly that one
-// difference (the same index, with 'sending' appended to the plan's list)
-// and nothing else, and logs it. If the plan is updated, or the migration
-// reverted, the difference disappears and this does nothing.
-func allowOutboxDueSending(t *testing.T, onlyPlan, onlyMigration []string) ([]string, []string) {
-	t.Helper()
-	const prefix = "index email_outbox.idx_outbox_due "
-	pi := slices.IndexFunc(onlyPlan, func(l string) bool { return strings.HasPrefix(l, prefix) })
-	mi := slices.IndexFunc(onlyMigration, func(l string) bool { return strings.HasPrefix(l, prefix) })
-	if pi < 0 || mi < 0 {
-		return onlyPlan, onlyMigration
-	}
-	widened := strings.Replace(onlyPlan[pi], "'failed'::text])", "'failed'::text, 'sending'::text])", 1)
-	if widened == onlyPlan[pi] || widened != onlyMigration[mi] {
-		return onlyPlan, onlyMigration
-	}
-	t.Logf("OPEN (not settled): idx_outbox_due also covers 'sending' in the migration but not in the plan's DDL\n  plan:      %s\n  migration: %s",
-		onlyPlan[pi], onlyMigration[mi])
-	return slices.Delete(slices.Clone(onlyPlan), pi, pi+1), slices.Delete(slices.Clone(onlyMigration), mi, mi+1)
 }
